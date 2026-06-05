@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { Navbar } from "@/components/Layout/Navbar";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Inline PDF Editor",
-  description: "Client-side PDF editor for inline document text changes.",
+  title: "DocToolkit",
+  description: "Client-side PDF editing, image editing, conversion, and scanning tools.",
 };
 
 export default function RootLayout({
@@ -13,7 +14,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <Navbar />
+        {children}
+      </body>
     </html>
   );
 }
