@@ -14,9 +14,9 @@ export function FabricCanvas({
   return (
     <section className="image-canvas-wrap">
       <div className={`image-empty ${editor.hasImage ? "is-hidden" : ""}`}>
-        <button className="tool-dropzone" type="button" onClick={() => inputRef.current?.click()}>
+        <button className="tool-dropzone" type="button" onClick={() => inputRef.current?.click()} disabled={!editor.isReady}>
           <Upload size={32} aria-hidden="true" />
-          <span>Upload JPG, PNG, WEBP, or GIF</span>
+          <span>{editor.isReady ? "Upload JPG, PNG, WEBP, or GIF" : "Preparing image editor"}</span>
           <small>The image stays in your browser and becomes the locked base layer.</small>
         </button>
       </div>

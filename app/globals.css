@@ -982,6 +982,9 @@ button {
 
 .fabric-canvas {
   background: white;
+}
+
+.image-canvas-wrap .canvas-container {
   box-shadow: 0 16px 46px rgba(22, 24, 19, 0.18);
 }
 
@@ -1062,7 +1065,15 @@ button {
   background: #dfe3dc;
 }
 
-.scan-image-frame img {
+.scan-image-stage {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  max-height: 70vh;
+  line-height: 0;
+}
+
+.scan-image-stage img {
   display: block;
   max-width: 100%;
   max-height: 70vh;

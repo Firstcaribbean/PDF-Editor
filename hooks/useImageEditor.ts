@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Document, ImageRun, Packer, Paragraph } from "docx";
 import { PDFDocument } from "pdf-lib";
-import { dataUrlToBlob, downloadBlob, fileToDataUrl, safeBaseName, uint8ArrayToArrayBuffer } from "@/lib/converters/shared";
+import { dataUrlToBlob, downloadBlob, fileToDataUrl, loadImageElement, safeBaseName, uint8ArrayToArrayBuffer } from "@/lib/converters/shared";
 
 export type ImageEditorTool = "move" | "text" | "draw" | "rect" | "circle" | "line";
 export type ImageExportFormat = "png" | "jpg" | "webp" | "pdf" | "docx";
@@ -29,15 +29,17 @@ export function useImageEditor() {
     const canvas = canvasRef.current;
     if (!Fabric || !canvas) throw new Error("The editor canvas is still loading.");
 
+    const sourceImage = await loadImageElement(dataUrl);
     const image = await Fabric.FabricImage.fromURL(dataUrl);
-    const rawWidth = image.width || 900;
-    const rawHeight = image.height || 650;
+    const rawWidth = sourceImage.naturalWidth || image.width || 900;
+    const rawHeight = sourceImage.naturalHeight || image.height || 650;
     const maxWidth = 1120;
     const scale = Math.min(1, maxWidth / rawWidth);
     const width = Math.max(1, Math.round(rawWidth * scale));
     const height = Math.max(1, Math.round(rawHeight * scale));
 
     canvas.clear();
+    canvas.backgroundColor = "#ffffff";
     canvas.setDimensions({ width, height });
     image.set({
       left: 0,
@@ -46,9 +48,19 @@ export function useImageEditor() {
       scaleY: height / rawHeight,
       selectable: false,
       evented: false,
+      hasControls: false,
+      hasBorders: false,
+      lockMovementX: true,
+      lockMovementY: true,
+      lockRotation: true,
+      lockScalingX: true,
+      lockScalingY: true,
+      hoverCursor: "default",
     });
-    canvas.backgroundImage = image;
-    canvas.renderAll();
+    canvas.add(image);
+    canvas.sendObjectToBack(image);
+    canvas.discardActiveObject();
+    canvas.requestRenderAll();
 
     setHasImage(true);
     if (nextName) setImageName(nextName);
@@ -64,6 +76,8 @@ export function useImageEditor() {
       if (disposed || !canvasElementRef.current) return;
 
       const canvas = new Fabric.Canvas(canvasElementRef.current, {
+        width: 900,
+        height: 560,
         backgroundColor: "#ffffff",
         preserveObjectStacking: true,
         selection: true,

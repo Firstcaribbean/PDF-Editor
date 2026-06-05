@@ -8,7 +8,6 @@ import { dataUrlToBlob, downloadBlob, fileToDataUrl, loadImageElement, safeBaseN
 import { textToDocxBlob } from "@/lib/converters/txtToPdf";
 import { detectDocumentCorners } from "@/lib/scanner/edgeDetection";
 import { EnhancementMode, enhanceCanvas } from "@/lib/scanner/imageEnhancement";
-import { loadOpenCV } from "@/lib/scanner/opencvLoader";
 import { cropByCorners } from "@/lib/scanner/perspectiveWarp";
 import { Point } from "@/lib/scanner/cornerOrdering";
 
@@ -123,7 +122,9 @@ export function useScanner() {
     setStatus("Cleaning scan...");
 
     try {
-      await loadOpenCV();
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
       const image = await loadImageElement(rawDataUrl);
       const cropped = await cropByCorners(image, corners);
       const enhanced = enhanceCanvas(cropped, enhancementMode);

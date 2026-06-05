@@ -17,10 +17,10 @@ export function EnhancementPreview({
         </div>
         <div className="scan-image-frame">
           {scanner.rawDataUrl ? (
-            <>
+            <div className="scan-image-stage">
               <img src={scanner.rawDataUrl} alt="Original scan" />
               <CornerHandles corners={scanner.corners} imageSize={scanner.imageSize} onChange={scanner.updateCorner} />
-            </>
+            </div>
           ) : (
             <span className="empty-panel-text">No scan loaded</span>
           )}
@@ -33,7 +33,13 @@ export function EnhancementPreview({
           <small>{scanner.enhancementMode}</small>
         </div>
         <div className="scan-image-frame">
-          {scanner.processedDataUrl ? <img src={scanner.processedDataUrl} alt="Cleaned scan" /> : <span className="empty-panel-text">Process the scan to preview</span>}
+          {scanner.processedDataUrl ? (
+            <div className="scan-image-stage">
+              <img src={scanner.processedDataUrl} alt="Cleaned scan" />
+            </div>
+          ) : (
+            <span className="empty-panel-text">Process the scan to preview</span>
+          )}
         </div>
       </div>
     </div>
