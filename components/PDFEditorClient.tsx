@@ -133,6 +133,7 @@ export function PDFEditorClient() {
   return (
     <main className="editor-root">
       <Toolbar
+        canDownload={dirtyCount > 0 || editor.hasMergedPages}
         currentPage={editor.activePageIndex}
         dirtyCount={dirtyCount}
         fontOptions={editor.fontOptions}
@@ -140,6 +141,8 @@ export function PDFEditorClient() {
         pageCount={editor.documentModel.pageCount}
         selectedTextBlock={editor.selectedTextBlock}
         zoom={editor.zoom}
+        hasMergedPages={editor.hasMergedPages}
+        onAddPDFs={editor.appendPDFs}
         onDownload={editor.exportPDF}
         onFile={handleFile}
         onFormatChange={editor.updateBlockFormat}

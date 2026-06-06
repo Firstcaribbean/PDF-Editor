@@ -1,18 +1,21 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
-import { Bold, ChevronLeft, ChevronRight, Download, Italic, Minus, Plus, RotateCcw, Strikethrough, Underline } from "lucide-react";
+import { Bold, ChevronLeft, ChevronRight, Download, FilePlus2, Italic, Minus, Plus, RotateCcw, Strikethrough, Underline } from "lucide-react";
 import { PDFUploader } from "@/components/PDFUploader";
 import type { EditorFontOption, EditorTextBlock } from "@/lib/types";
 
 type ToolbarProps = {
   currentPage: number;
+  canDownload: boolean;
   dirtyCount: number;
   fontOptions: EditorFontOption[];
   isExporting: boolean;
   pageCount: number;
   selectedTextBlock: EditorTextBlock | null;
   zoom: number;
+  hasMergedPages: boolean;
+  onAddPDFs: (files: File[]) => void | Promise<void>;
   onDownload: () => void;
   onFile: (file: File) => void | Promise<void>;
   onFormatChange: (
@@ -26,12 +29,15 @@ type ToolbarProps = {
 
 export function Toolbar({
   currentPage,
+  canDownload,
   dirtyCount,
   fontOptions,
   isExporting,
   pageCount,
   selectedTextBlock,
   zoom,
+  hasMergedPages,
+  onAddPDFs,
   onDownload,
   onFile,
   onFormatChange,
@@ -55,6 +61,18 @@ export function Toolbar({
   const handlePageInput = (event: ChangeEvent<HTMLInputElement>) => {
     setPageInput(event.target.value);
   };
+
+  const handleAddPDFs = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []).filter(
+      (file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"),
+    );
+    event.target.value = "";
+
+    if (files.length) {
+      await onAddPDFs(files);
+    }
+  };
+
   const hasSelection = Boolean(selectedTextBlock);
   const selectedBlockId = selectedTextBlock?.id ?? "";
   const isBold = selectedTextBlock ? Number(selectedTextBlock.fontWeight) >= 600 : false;
@@ -79,6 +97,17 @@ export function Toolbar({
     <header className="toolbar">
       <div className="toolbar-group">
         <PDFUploader compact onFile={onFile} disabled={isExporting} />
+        <label className="toolbar-file-button" title="Add PDFs">
+          <FilePlus2 size={17} aria-hidden="true" />
+          <span>Add PDFs</span>
+          <input
+            type="file"
+            accept="application/pdf,.pdf"
+            multiple
+            onChange={handleAddPDFs}
+            disabled={isExporting}
+          />
+        </label>
         <span className="toolbar-divider" />
         <button
           className="icon-button"
@@ -201,7 +230,7 @@ export function Toolbar({
 
       <div className="toolbar-group toolbar-end">
         <span className={`dirty-pill ${dirtyCount ? "is-dirty" : ""}`}>
-          {dirtyCount ? `${dirtyCount} edited` : "No edits"}
+          {dirtyCount ? `${dirtyCount} edited` : hasMergedPages ? "Merged PDF" : "No edits"}
         </span>
         <button
           className="icon-button"
@@ -217,7 +246,7 @@ export function Toolbar({
           className="primary-button"
           type="button"
           onClick={onDownload}
-          disabled={!dirtyCount || isExporting}
+          disabled={!canDownload || isExporting}
         >
           <Download size={17} aria-hidden="true" />
           <span>{isExporting ? "Exporting" : "Download"}</span>

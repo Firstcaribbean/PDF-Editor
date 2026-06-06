@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
+import { PDFDocument } from "pdf-lib";
 import { extractPDFDocument } from "@/lib/extractTextBlocks";
 import { rebuildPDF } from "@/lib/rebuildPDF";
 import type { EditorDocumentModel, EditorFontOption, EditorTextBlock, ImageReplacement, RGBColor } from "@/lib/types";
@@ -187,6 +188,7 @@ export function usePDFEditor() {
   const [zoom, setZoom] = useState(1);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [hasMergedPages, setHasMergedPages] = useState(false);
 
   const dirtyBlocks = useMemo(() => {
     return documentModel?.pages.flatMap((page) => page.textBlocks.filter((block) => block.dirty)) ?? [];
@@ -208,6 +210,7 @@ export function usePDFEditor() {
     setError(null);
     setSelectedBlockId(null);
     setActivePageIndex(0);
+    setHasMergedPages(false);
 
     try {
       const loaded = await extractPDFDocument(bytes, fileName);
@@ -220,6 +223,16 @@ export function usePDFEditor() {
       setError(message);
       setStatus("error");
     }
+  }, []);
+
+  const loadMergedDocument = useCallback(async (bytes: Uint8Array, fileName: string) => {
+    const loaded = await extractPDFDocument(bytes, fileName);
+    const documentWithFonts = await registerEmbeddedFonts(loaded.document);
+    pdfRef.current = loaded.pdf;
+    setDocumentModel(documentWithFonts);
+    setSelectedBlockId(null);
+    setActivePageIndex(0);
+    setHasMergedPages(true);
   }, []);
 
   const updateBlockText = useCallback((blockId: string, text: string) => {
@@ -384,17 +397,20 @@ export function usePDFEditor() {
   }, []);
 
   const exportPDF = useCallback(async () => {
-    if (!documentModel || (!dirtyBlocks.length && !dirtyImageBlocks.length)) return;
+    if (!documentModel || (!dirtyBlocks.length && !dirtyImageBlocks.length && !hasMergedPages)) return;
 
     setIsExporting(true);
     setError(null);
 
     try {
-      const bytes = await rebuildPDF(documentModel.originalBytes, {
-        textBlocks: dirtyBlocks,
-        imageBlocks: dirtyImageBlocks,
-        fonts: documentModel.fonts,
-      });
+      const bytes =
+        dirtyBlocks.length || dirtyImageBlocks.length
+          ? await rebuildPDF(documentModel.originalBytes, {
+              textBlocks: dirtyBlocks,
+              imageBlocks: dirtyImageBlocks,
+              fonts: documentModel.fonts,
+            })
+          : documentModel.originalBytes;
       downloadBytes(bytes, documentModel.fileName);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "The PDF could not be exported.";
@@ -402,7 +418,47 @@ export function usePDFEditor() {
     } finally {
       setIsExporting(false);
     }
-  }, [dirtyBlocks, dirtyImageBlocks, documentModel]);
+  }, [dirtyBlocks, dirtyImageBlocks, documentModel, hasMergedPages]);
+
+  const appendPDFs = useCallback(
+    async (files: File[]) => {
+      if (!documentModel || !files.length) return;
+
+      setStatus("loading");
+      setError(null);
+
+      try {
+        const currentBytes =
+          dirtyBlocks.length || dirtyImageBlocks.length
+            ? await rebuildPDF(documentModel.originalBytes, {
+                textBlocks: dirtyBlocks,
+                imageBlocks: dirtyImageBlocks,
+                fonts: documentModel.fonts,
+              })
+            : documentModel.originalBytes;
+        const mergedDoc = await PDFDocument.create();
+        const sourceByteSets = [currentBytes, ...(await Promise.all(files.map((file) => file.arrayBuffer())))];
+
+        for (const sourceBytes of sourceByteSets) {
+          const sourceDoc = await PDFDocument.load(sourceBytes);
+          const pageIndexes = sourceDoc.getPageIndices();
+          const copiedPages = await mergedDoc.copyPages(sourceDoc, pageIndexes);
+          copiedPages.forEach((page) => mergedDoc.addPage(page));
+        }
+
+        const mergedBytes = await mergedDoc.save();
+        const baseName = documentModel.fileName.replace(/\.pdf$/i, "");
+        const suffix = files.length === 1 ? "plus-1-pdf" : `plus-${files.length}-pdfs`;
+        await loadMergedDocument(mergedBytes, `${baseName}-${suffix}.pdf`);
+        setStatus("ready");
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : "The PDFs could not be added.";
+        setError(message);
+        setStatus("error");
+      }
+    },
+    [dirtyBlocks, dirtyImageBlocks, documentModel, loadMergedDocument],
+  );
 
   const setZoomClamped = useCallback((nextZoom: number) => {
     setZoom(Math.min(2.5, Math.max(0.55, Number(nextZoom.toFixed(2)))));
@@ -414,6 +470,7 @@ export function usePDFEditor() {
     dirtyImageBlocks,
     documentModel,
     error,
+    hasMergedPages,
     isExporting,
     fontOptions,
     pdf: pdfRef.current,
@@ -422,6 +479,7 @@ export function usePDFEditor() {
     status,
     zoom,
     exportPDF,
+    appendPDFs,
     loadBytes,
     replaceImageBlock,
     resetBlock,
