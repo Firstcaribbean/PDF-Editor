@@ -1,5 +1,5 @@
 import fontkit from "@pdf-lib/fontkit";
-import { PDFDocument, degrees, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
 import { mapToStandardPdfFont } from "@/lib/fontMapper";
 import type { EditorFontResource, EditorImageBlock, EditorTextBlock, RGBColor } from "@/lib/types";
 
@@ -60,6 +60,60 @@ type RebuildPDFInput = {
   fonts: Record<string, EditorFontResource>;
 };
 
+function normalizeFontHint(value = "") {
+  return value
+    .replace(/^standard:/i, "")
+    .replace(/^[A-Z]{6}\+/, "")
+    .replace(/["']/g, " ")
+    .replace(/[,_-]+/g, " ")
+    .toLowerCase();
+}
+
+function exactStandardFont(fontName: string, fontWeight?: string, fontStyle?: string) {
+  const normalized = normalizeFontHint(fontName);
+  const isBold = normalized.includes("bold") || Number(fontWeight) >= 600;
+  const isItalic = normalized.includes("italic") || normalized.includes("oblique") || fontStyle === "italic";
+
+  if (normalized === "helvetica" || normalized === "arial" || normalized === "calibri") {
+    if (isBold && isItalic) return StandardFonts.HelveticaBoldOblique;
+    if (isBold) return StandardFonts.HelveticaBold;
+    if (isItalic) return StandardFonts.HelveticaOblique;
+    return StandardFonts.Helvetica;
+  }
+
+  if (normalized === "times roman" || normalized === "times" || normalized === "times new roman") {
+    if (isBold && isItalic) return StandardFonts.TimesRomanBoldItalic;
+    if (isBold) return StandardFonts.TimesRomanBold;
+    if (isItalic) return StandardFonts.TimesRomanItalic;
+    return StandardFonts.TimesRoman;
+  }
+
+  if (normalized === "courier" || normalized === "courier new") {
+    if (isBold && isItalic) return StandardFonts.CourierBoldOblique;
+    if (isBold) return StandardFonts.CourierBold;
+    if (isItalic) return StandardFonts.CourierOblique;
+    return StandardFonts.Courier;
+  }
+
+  return null;
+}
+
+function standardFallbackForBlock(block: EditorTextBlock, fontResource?: EditorFontResource) {
+  const explicitStandardFont = exactStandardFont(block.fontName, block.fontWeight, block.fontStyle);
+  if (explicitStandardFont) return explicitStandardFont;
+
+  const realPdfNames = [
+    block.fontName,
+    block.originalFontName,
+    fontResource?.originalName,
+    fontResource?.id,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return mapToStandardPdfFont(realPdfNames, block.fontWeight, block.fontStyle);
+}
+
 export async function rebuildPDF(originalBytes: Uint8Array, edits: RebuildPDFInput) {
   const pdfDoc = await PDFDocument.load(originalBytes);
   const pages = pdfDoc.getPages();
@@ -71,15 +125,14 @@ export async function rebuildPDF(originalBytes: Uint8Array, edits: RebuildPDFInp
     if (!page) continue;
 
     const fontResource = edits.fonts[block.fontName];
-    const fontStyleChanged = block.fontWeight !== block.originalFontWeight || block.fontStyle !== block.originalFontStyle;
-    const canUseOriginalFont = Boolean(fontResource?.bytes?.length) && !fontStyleChanged;
-    const cacheKey = canUseOriginalFont
+    const canUseEmbeddedFont = Boolean(fontResource?.bytes?.length) && !block.fontName.startsWith("standard:");
+    const cacheKey = canUseEmbeddedFont
       ? `embedded:${block.fontName}`
-      : `standard:${block.fontName}:${block.fontWeight}:${block.fontStyle}`;
+      : `standard:${block.fontName}:${block.originalFontName}:${block.fontWeight}:${block.fontStyle}`;
     let font = fontCache.get(cacheKey);
 
     if (!font) {
-      if (canUseOriginalFont && fontResource?.bytes?.length) {
+      if (canUseEmbeddedFont && fontResource?.bytes?.length) {
         try {
           if (!fontkitRegistered) {
             pdfDoc.registerFontkit(fontkit);
@@ -92,11 +145,7 @@ export async function rebuildPDF(originalBytes: Uint8Array, edits: RebuildPDFInp
       }
 
       if (!font) {
-        const standardFont = mapToStandardPdfFont(
-          `${block.fontName} ${block.fontFamily} ${fontResource?.originalName ?? ""} ${fontResource?.fallbackName ?? ""}`,
-          block.fontWeight,
-          block.fontStyle,
-        );
+        const standardFont = standardFallbackForBlock(block, fontResource);
         font = await pdfDoc.embedFont(standardFont);
       }
 

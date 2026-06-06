@@ -338,6 +338,7 @@ export async function extractPDFDocument(
   const loadingTask = pdfjsLib.getDocument({
     data: cloneBytes(originalBytes),
     disableFontFace: false,
+    fontExtraProperties: true,
     useSystemFonts: true,
   });
   const pdf = await loadingTask.promise;
