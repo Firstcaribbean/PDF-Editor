@@ -6,7 +6,8 @@ import { useState } from "react";
 import { Camera, FileText, ImageIcon, RefreshCw } from "lucide-react";
 import { PDFUploader } from "@/components/PDFUploader";
 import { createSamplePDFFile } from "@/lib/createSamplePDF";
-import { storePDFFile } from "@/lib/fileStore";
+import { storePDFBytes } from "@/lib/fileStore";
+import { preparePDFEditorInput } from "@/lib/pdfEditorInput";
 
 const tools = [
   {
@@ -16,9 +17,9 @@ const tools = [
     icon: FileText,
   },
   {
-    href: "/image-editor",
+    href: "/editor",
     title: "Image Editor",
-    description: "Annotate images with text, drawing, shapes, crop, and export options.",
+    description: "Open images as PDF pages, add text, replace images, and download as one PDF.",
     icon: ImageIcon,
   },
   {
@@ -45,10 +46,11 @@ export function HomeWorkspace() {
     setError(null);
 
     try {
-      const id = await storePDFFile(file);
+      const prepared = await preparePDFEditorInput(file);
+      const id = await storePDFBytes(prepared.bytes, prepared.fileName, { downloadable: prepared.source === "image" });
       router.push(`/editor?doc=${encodeURIComponent(id)}`);
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "The PDF could not be opened.";
+      const message = caught instanceof Error ? caught.message : "The file could not be opened.";
       setError(message);
       setIsOpening(false);
     }
@@ -86,7 +88,7 @@ export function HomeWorkspace() {
         <div className="quick-upload-panel">
           <div className="panel-heading">
             <span>Quick PDF edit</span>
-            <small>Open directly in the inline editor</small>
+            <small>Open PDFs or images in the inline editor</small>
           </div>
           <PDFUploader onFile={handleFile} disabled={isOpening} />
           <div className="home-actions">

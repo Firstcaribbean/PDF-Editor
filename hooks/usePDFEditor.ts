@@ -4,7 +4,8 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { PDFDocument } from "pdf-lib";
 import { extractPDFDocument } from "@/lib/extractTextBlocks";
 import { rebuildPDF } from "@/lib/rebuildPDF";
-import type { EditorDocumentModel, EditorFontOption, EditorTextBlock, ImageReplacement, RGBColor } from "@/lib/types";
+import { preparePDFEditorInputs } from "@/lib/pdfEditorInput";
+import type { EditorDocumentModel, EditorFontOption, EditorPageModel, EditorTextBlock, ImageReplacement, RGBColor } from "@/lib/types";
 
 type EditorStatus = "idle" | "loading" | "ready" | "error";
 
@@ -50,6 +51,10 @@ function isTextBlockDirty(block: EditorTextBlock) {
     block.underline !== block.originalUnderline ||
     block.strikeThrough !== block.originalStrikeThrough
   );
+}
+
+function isInsertedTextBlock(block: EditorTextBlock) {
+  return block.originalText === "" && block.id.includes("-new-");
 }
 
 function downloadBytes(bytes: Uint8Array, fileName: string) {
@@ -179,6 +184,57 @@ function buildFontOptions(document: EditorDocumentModel | null): EditorFontOptio
   return [...detected.sort((a, b) => a.label.localeCompare(b.label)), ...standardFontOptions];
 }
 
+function createInsertedTextBlock(page: EditorPageModel): EditorTextBlock {
+  const font = standardFontOptions[0];
+  const fontSize = Math.max(14, Math.min(28, page.width / 24));
+  const ascent = 0.8;
+  const descent = -0.2;
+  const left = Math.max(24, page.width * 0.12);
+  const top = Math.max(24, page.height * 0.12);
+  const text = "New text";
+
+  return {
+    id: `p${page.pageNumber}-new-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    pageIndex: page.pageIndex,
+    pageNumber: page.pageNumber,
+    text,
+    originalText: "",
+    screen: {
+      left,
+      top,
+      width: Math.max(120, text.length * fontSize * 0.62),
+      height: fontSize * 1.2,
+    },
+    pdf: {
+      x: left,
+      y: page.height - top - ascent * fontSize,
+      width: Math.max(120, text.length * fontSize * 0.62),
+      height: fontSize,
+    },
+    fontName: font.fontName,
+    originalFontName: font.fontName,
+    fontFamily: font.fontFamily,
+    originalFontFamily: font.fontFamily,
+    fontSize,
+    pdfFontSize: fontSize,
+    ascent,
+    descent,
+    horizontalScale: 1,
+    fontWeight: "400",
+    originalFontWeight: "400",
+    fontStyle: "normal",
+    originalFontStyle: "normal",
+    underline: false,
+    originalUnderline: false,
+    strikeThrough: false,
+    originalStrikeThrough: false,
+    color: { red: 0.05, green: 0.06, blue: 0.07 },
+    backgroundColor: { red: 1, green: 1, blue: 1 },
+    rotation: 0,
+    dirty: true,
+  };
+}
+
 export function usePDFEditor() {
   const pdfRef = useRef<any>(null);
   const [documentModel, setDocumentModel] = useState<EditorDocumentModel | null>(null);
@@ -205,12 +261,12 @@ export function usePDFEditor() {
 
   const fontOptions = useMemo(() => buildFontOptions(documentModel), [documentModel]);
 
-  const loadBytes = useCallback(async (bytes: ArrayBuffer | Uint8Array, fileName: string) => {
+  const loadBytes = useCallback(async (bytes: ArrayBuffer | Uint8Array, fileName: string, options?: { downloadable?: boolean }) => {
     setStatus("loading");
     setError(null);
     setSelectedBlockId(null);
     setActivePageIndex(0);
-    setHasMergedPages(false);
+    setHasMergedPages(Boolean(options?.downloadable));
 
     try {
       const loaded = await extractPDFDocument(bytes, fileName);
@@ -291,24 +347,28 @@ export function usePDFEditor() {
         ...current,
         pages: current.pages.map((page) => ({
           ...page,
-          textBlocks: page.textBlocks.map((block) =>
-            block.id === blockId
-              ? {
-                  ...block,
-                  text: block.originalText,
-                  fontName: block.originalFontName,
-                  fontFamily: block.originalFontFamily,
-                  fontWeight: block.originalFontWeight,
-                  fontStyle: block.originalFontStyle,
-                  underline: block.originalUnderline,
-                  strikeThrough: block.originalStrikeThrough,
-                  dirty: false,
-                }
-              : block,
-          ),
+          textBlocks: page.textBlocks.flatMap((block) => {
+            if (block.id !== blockId) return [block];
+            if (isInsertedTextBlock(block)) return [];
+
+            return [
+              {
+                ...block,
+                text: block.originalText,
+                fontName: block.originalFontName,
+                fontFamily: block.originalFontFamily,
+                fontWeight: block.originalFontWeight,
+                fontStyle: block.originalFontStyle,
+                underline: block.originalUnderline,
+                strikeThrough: block.originalStrikeThrough,
+                dirty: false,
+              },
+            ];
+          }),
         })),
       };
     });
+    setSelectedBlockId(null);
   }, []);
 
   const replaceImageBlock = useCallback((blockId: string, replacement: ImageReplacement) => {
@@ -341,17 +401,19 @@ export function usePDFEditor() {
         ...current,
         pages: current.pages.map((page) => ({
           ...page,
-          textBlocks: page.textBlocks.map((block) => ({
-            ...block,
-            text: block.originalText,
-            fontName: block.originalFontName,
-            fontFamily: block.originalFontFamily,
-            fontWeight: block.originalFontWeight,
-            fontStyle: block.originalFontStyle,
-            underline: block.originalUnderline,
-            strikeThrough: block.originalStrikeThrough,
-            dirty: false,
-          })),
+          textBlocks: page.textBlocks
+            .filter((block) => !isInsertedTextBlock(block))
+            .map((block) => ({
+              ...block,
+              text: block.originalText,
+              fontName: block.originalFontName,
+              fontFamily: block.originalFontFamily,
+              fontWeight: block.originalFontWeight,
+              fontStyle: block.originalFontStyle,
+              underline: block.originalUnderline,
+              strikeThrough: block.originalStrikeThrough,
+              dirty: false,
+            })),
           imageBlocks: page.imageBlocks.map((block) => ({
             ...block,
             replacement: undefined,
@@ -360,7 +422,38 @@ export function usePDFEditor() {
         })),
       };
     });
+    setSelectedBlockId(null);
   }, []);
+
+  const addTextBlock = useCallback(() => {
+    let nextBlockId: string | null = null;
+
+    setDocumentModel((current) => {
+      if (!current) return current;
+
+      const targetPage = current.pages[activePageIndex] ?? current.pages[0];
+      if (!targetPage) return current;
+
+      const block = createInsertedTextBlock(targetPage);
+      nextBlockId = block.id;
+
+      return {
+        ...current,
+        pages: current.pages.map((page) =>
+          page.pageIndex === targetPage.pageIndex
+            ? {
+                ...page,
+                textBlocks: [...page.textBlocks, block],
+              }
+            : page,
+        ),
+      };
+    });
+
+    if (nextBlockId) {
+      setSelectedBlockId(nextBlockId);
+    }
+  }, [activePageIndex]);
 
   const updatePageBackgrounds = useCallback((pageIndex: number, samples: BackgroundSample[]) => {
     if (!samples.length) return;
@@ -437,7 +530,11 @@ export function usePDFEditor() {
               })
             : documentModel.originalBytes;
         const mergedDoc = await PDFDocument.create();
-        const sourceByteSets = [currentBytes, ...(await Promise.all(files.map((file) => file.arrayBuffer())))];
+        const preparedFiles = await preparePDFEditorInputs(files);
+        if (!preparedFiles.length) {
+          throw new Error("Choose PDF or image files to add.");
+        }
+        const sourceByteSets = [currentBytes, ...preparedFiles.map((file) => file.bytes)];
 
         for (const sourceBytes of sourceByteSets) {
           const sourceDoc = await PDFDocument.load(sourceBytes);
@@ -448,11 +545,11 @@ export function usePDFEditor() {
 
         const mergedBytes = await mergedDoc.save();
         const baseName = documentModel.fileName.replace(/\.pdf$/i, "");
-        const suffix = files.length === 1 ? "plus-1-pdf" : `plus-${files.length}-pdfs`;
+        const suffix = preparedFiles.length === 1 ? "plus-1-page" : `plus-${preparedFiles.length}-files`;
         await loadMergedDocument(mergedBytes, `${baseName}-${suffix}.pdf`);
         setStatus("ready");
       } catch (caught) {
-        const message = caught instanceof Error ? caught.message : "The PDFs could not be added.";
+        const message = caught instanceof Error ? caught.message : "The files could not be added.";
         setError(message);
         setStatus("error");
       }
@@ -478,6 +575,7 @@ export function usePDFEditor() {
     selectedTextBlock,
     status,
     zoom,
+    addTextBlock,
     exportPDF,
     appendPDFs,
     loadBytes,

@@ -108,5 +108,6 @@ export type StoredPDFDocument = {
   fileName: string;
   bytes: ArrayBuffer;
   createdAt: number;
+  downloadable?: boolean;
   size: number;
 };

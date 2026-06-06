@@ -8,7 +8,8 @@ import { PDFViewer } from "@/components/PDFViewer";
 import { Toolbar } from "@/components/Toolbar";
 import { usePDFEditor } from "@/hooks/usePDFEditor";
 import { createSamplePDFFile } from "@/lib/createSamplePDF";
-import { loadStoredPDF, storePDFFile } from "@/lib/fileStore";
+import { loadStoredPDF, storePDFBytes } from "@/lib/fileStore";
+import { preparePDFEditorInput } from "@/lib/pdfEditorInput";
 
 function EditorEmptyState({
   isLoading,
@@ -61,9 +62,10 @@ export function PDFEditorClient() {
 
   const handleFile = useCallback(
     async (file: File) => {
-      const id = await storePDFFile(file);
+      const prepared = await preparePDFEditorInput(file);
+      const id = await storePDFBytes(prepared.bytes, prepared.fileName, { downloadable: prepared.source === "image" });
       router.replace(`/editor?doc=${encodeURIComponent(id)}`);
-      await loadBytes(await file.arrayBuffer(), file.name);
+      await loadBytes(prepared.bytes, prepared.fileName, { downloadable: prepared.source === "image" });
     },
     [loadBytes, router],
   );
@@ -85,7 +87,7 @@ export function PDFEditorClient() {
     async function loadInitialDocument(id: string) {
       const record = await loadStoredPDF(id);
       if (record) {
-        await loadBytes(record.bytes, record.fileName);
+        await loadBytes(record.bytes, record.fileName, { downloadable: record.downloadable });
       }
       setHasTriedInitialLoad(true);
     }
@@ -143,6 +145,7 @@ export function PDFEditorClient() {
         zoom={editor.zoom}
         hasMergedPages={editor.hasMergedPages}
         onAddPDFs={editor.appendPDFs}
+        onAddText={editor.addTextBlock}
         onDownload={editor.exportPDF}
         onFile={handleFile}
         onFormatChange={editor.updateBlockFormat}
@@ -169,26 +172,19 @@ export function PDFEditorClient() {
             </div>
             {editor.error ? <p className="field-error">{editor.error}</p> : null}
           </div>
-          {editableElementCount ? (
-            <PDFViewer
-              activePageIndex={editor.activePageIndex}
-              documentModel={editor.documentModel}
-              pdf={editor.pdf}
-              selectedBlockId={editor.selectedBlockId}
-              zoom={editor.zoom}
-              onActivePageChange={editor.setActivePageIndex}
-              onBlockChange={editor.updateBlockText}
-              onBlockReset={editor.resetBlock}
-              onBlockSelect={editor.setSelectedBlockId}
-              onImageReplace={editor.replaceImageBlock}
-              onPageBackgrounds={editor.updatePageBackgrounds}
-            />
-          ) : (
-            <div className="no-text-panel">
-              <strong>No editable content was found.</strong>
-              <span>This document may be scanned or image-only.</span>
-            </div>
-          )}
+          <PDFViewer
+            activePageIndex={editor.activePageIndex}
+            documentModel={editor.documentModel}
+            pdf={editor.pdf}
+            selectedBlockId={editor.selectedBlockId}
+            zoom={editor.zoom}
+            onActivePageChange={editor.setActivePageIndex}
+            onBlockChange={editor.updateBlockText}
+            onBlockReset={editor.resetBlock}
+            onBlockSelect={editor.setSelectedBlockId}
+            onImageReplace={editor.replaceImageBlock}
+            onPageBackgrounds={editor.updatePageBackgrounds}
+          />
         </section>
       </div>
     </main>

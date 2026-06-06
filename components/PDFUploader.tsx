@@ -2,6 +2,7 @@
 
 import { ChangeEvent, DragEvent, useRef, useState } from "react";
 import { FileText, UploadCloud } from "lucide-react";
+import { isPDFEditorInput, pdfEditorInputAccept } from "@/lib/pdfEditorInput";
 
 const MAX_SIZE = 50 * 1024 * 1024;
 
@@ -12,12 +13,12 @@ type PDFUploaderProps = {
 };
 
 function validateFile(file: File) {
-  if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-    return "Choose a PDF file.";
+  if (!isPDFEditorInput(file)) {
+    return "Choose a PDF or image file.";
   }
 
   if (file.size > MAX_SIZE) {
-    return "PDF must be 50 MB or smaller.";
+    return "File must be 50 MB or smaller.";
   }
 
   return null;
@@ -57,7 +58,7 @@ export function PDFUploader({ onFile, compact = false, disabled = false }: PDFUp
       <label className="toolbar-file-button" title="Open PDF">
         <UploadCloud size={17} aria-hidden="true" />
         <span>Open</span>
-        <input ref={inputRef} type="file" accept="application/pdf,.pdf" onChange={handleInput} disabled={disabled} />
+        <input ref={inputRef} type="file" accept={pdfEditorInputAccept} onChange={handleInput} disabled={disabled} />
       </label>
     );
   }
@@ -79,10 +80,10 @@ export function PDFUploader({ onFile, compact = false, disabled = false }: PDFUp
         <span className="uploader-icon">
           <FileText size={34} aria-hidden="true" />
         </span>
-        <span className="uploader-title">Drop a PDF here</span>
-        <span className="uploader-subtitle">or click to open one, up to 50 MB</span>
+        <span className="uploader-title">Drop a PDF or image here</span>
+        <span className="uploader-subtitle">PDF, JPG, PNG, WEBP, or GIF up to 50 MB</span>
       </button>
-      <input ref={inputRef} type="file" accept="application/pdf,.pdf" onChange={handleInput} disabled={disabled} hidden />
+      <input ref={inputRef} type="file" accept={pdfEditorInputAccept} onChange={handleInput} disabled={disabled} hidden />
       {error ? <p className="field-error">{error}</p> : null}
     </div>
   );

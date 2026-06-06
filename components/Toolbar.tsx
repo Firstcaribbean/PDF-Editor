@@ -1,8 +1,9 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
-import { Bold, ChevronLeft, ChevronRight, Download, FilePlus2, Italic, Minus, Plus, RotateCcw, Strikethrough, Underline } from "lucide-react";
+import { Bold, ChevronLeft, ChevronRight, Download, FilePlus2, Italic, Minus, Plus, RotateCcw, Strikethrough, Type, Underline } from "lucide-react";
 import { PDFUploader } from "@/components/PDFUploader";
+import { isPDFEditorInput, pdfEditorInputAccept } from "@/lib/pdfEditorInput";
 import type { EditorFontOption, EditorTextBlock } from "@/lib/types";
 
 type ToolbarProps = {
@@ -16,6 +17,7 @@ type ToolbarProps = {
   zoom: number;
   hasMergedPages: boolean;
   onAddPDFs: (files: File[]) => void | Promise<void>;
+  onAddText: () => void;
   onDownload: () => void;
   onFile: (file: File) => void | Promise<void>;
   onFormatChange: (
@@ -38,6 +40,7 @@ export function Toolbar({
   zoom,
   hasMergedPages,
   onAddPDFs,
+  onAddText,
   onDownload,
   onFile,
   onFormatChange,
@@ -63,9 +66,7 @@ export function Toolbar({
   };
 
   const handleAddPDFs = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []).filter(
-      (file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"),
-    );
+    const files = Array.from(event.target.files ?? []).filter(isPDFEditorInput);
     event.target.value = "";
 
     if (files.length) {
@@ -97,12 +98,12 @@ export function Toolbar({
     <header className="toolbar">
       <div className="toolbar-group">
         <PDFUploader compact onFile={onFile} disabled={isExporting} />
-        <label className="toolbar-file-button" title="Add PDFs">
+        <label className="toolbar-file-button" title="Add PDFs or images">
           <FilePlus2 size={17} aria-hidden="true" />
-          <span>Add PDFs</span>
+          <span>Add pages</span>
           <input
             type="file"
-            accept="application/pdf,.pdf"
+            accept={pdfEditorInputAccept}
             multiple
             onChange={handleAddPDFs}
             disabled={isExporting}
@@ -141,6 +142,17 @@ export function Toolbar({
       </div>
 
       <div className="toolbar-group toolbar-center">
+        <button
+          className="icon-button"
+          type="button"
+          title="Add text"
+          aria-label="Add text"
+          onClick={onAddText}
+          disabled={isExporting}
+        >
+          <Type size={16} aria-hidden="true" />
+        </button>
+        <span className="toolbar-divider" />
         <label className="font-select-wrap" title="Font family">
           <span className="sr-only">Font family</span>
           <select
@@ -230,7 +242,7 @@ export function Toolbar({
 
       <div className="toolbar-group toolbar-end">
         <span className={`dirty-pill ${dirtyCount ? "is-dirty" : ""}`}>
-          {dirtyCount ? `${dirtyCount} edited` : hasMergedPages ? "Merged PDF" : "No edits"}
+          {dirtyCount ? `${dirtyCount} edited` : hasMergedPages ? "Ready PDF" : "No edits"}
         </span>
         <button
           className="icon-button"

@@ -21,15 +21,19 @@ function openDatabase(): Promise<IDBDatabase> {
 }
 
 export async function storePDFFile(file: File) {
+  return storePDFBytes(await file.arrayBuffer(), file.name);
+}
+
+export async function storePDFBytes(bytes: ArrayBuffer, fileName: string, options?: { downloadable?: boolean }) {
   const db = await openDatabase();
   const id = `${Date.now()}-${crypto.randomUUID()}`;
-  const bytes = await file.arrayBuffer();
   const record: StoredPDFDocument = {
     id,
-    fileName: file.name,
+    fileName,
     bytes,
     createdAt: Date.now(),
-    size: file.size,
+    downloadable: options?.downloadable,
+    size: bytes.byteLength,
   };
 
   await new Promise<void>((resolve, reject) => {

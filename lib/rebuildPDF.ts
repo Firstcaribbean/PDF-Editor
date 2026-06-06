@@ -166,15 +166,17 @@ export async function rebuildPDF(originalBytes: Uint8Array, edits: RebuildPDFInp
       font.widthOfTextAtSize(block.text, fontSize),
     );
 
-    page.drawRectangle({
-      x: block.pdf.x - paddingX,
-      y: block.pdf.y + descent * fontSize - paddingY,
-      width: eraseWidth + paddingX * 2,
-      height: textBoxHeight + paddingY * 2,
-      color: background,
-      opacity: 1,
-      rotate: degrees(block.rotation),
-    });
+    if (block.originalText) {
+      page.drawRectangle({
+        x: block.pdf.x - paddingX,
+        y: block.pdf.y + descent * fontSize - paddingY,
+        width: eraseWidth + paddingX * 2,
+        height: textBoxHeight + paddingY * 2,
+        color: background,
+        opacity: 1,
+        rotate: degrees(block.rotation),
+      });
+    }
 
     const lineHeight = fontSize * 1.15;
     normalizeLines(block.text).forEach((line, lineIndex) => {
