@@ -33,7 +33,9 @@ export type EditorTextBlock = {
   };
   pdf: TextBlockGeometry;
   fontName: string;
+  originalFontName: string;
   fontFamily: string;
+  originalFontFamily: string;
   fontSize: number;
   pdfFontSize: number;
   ascent: number;
@@ -51,6 +53,13 @@ export type EditorTextBlock = {
   backgroundColor: RGBColor;
   rotation: number;
   dirty: boolean;
+};
+
+export type EditorFontOption = {
+  fontName: string;
+  fontFamily: string;
+  label: string;
+  source: "detected" | "standard";
 };
 
 export type ImageReplacement = {

@@ -73,10 +73,11 @@ function cloneFontBytes(data: unknown) {
 function getPdfJsFontFamily(page: any, fontName: string, style: Record<string, any>) {
   const fontObject = getPdfJsFontObject(page, fontName);
   return (
-    fontObject?.systemFontInfo?.css ??
     fontObject?.cssFontInfo?.fontFamily ??
+    fontObject?.name ??
     fontObject?.loadedName ??
-    style.fontFamily
+    style.fontFamily ??
+    fontObject?.systemFontInfo?.css
   );
 }
 
@@ -305,7 +306,9 @@ function extractTextBlock({
       height: pdfBoxHeight,
     },
     fontName,
+    originalFontName: fontName,
     fontFamily: mapPdfFontToWeb(fontName, pdfFontFamily),
+    originalFontFamily: mapPdfFontToWeb(fontName, pdfFontFamily),
     fontSize: screenFontHeight,
     pdfFontSize,
     ascent,

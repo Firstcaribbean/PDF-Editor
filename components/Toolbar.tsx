@@ -3,11 +3,12 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { Bold, ChevronLeft, ChevronRight, Download, Italic, Minus, Plus, RotateCcw, Strikethrough, Underline } from "lucide-react";
 import { PDFUploader } from "@/components/PDFUploader";
-import type { EditorTextBlock } from "@/lib/types";
+import type { EditorFontOption, EditorTextBlock } from "@/lib/types";
 
 type ToolbarProps = {
   currentPage: number;
   dirtyCount: number;
+  fontOptions: EditorFontOption[];
   isExporting: boolean;
   pageCount: number;
   selectedTextBlock: EditorTextBlock | null;
@@ -16,7 +17,7 @@ type ToolbarProps = {
   onFile: (file: File) => void | Promise<void>;
   onFormatChange: (
     blockId: string,
-    patch: Partial<Pick<EditorTextBlock, "fontWeight" | "fontStyle" | "underline" | "strikeThrough">>,
+    patch: Partial<Pick<EditorTextBlock, "fontName" | "fontFamily" | "fontWeight" | "fontStyle" | "underline" | "strikeThrough">>,
   ) => void;
   onPageChange: (pageIndex: number) => void;
   onResetAll: () => void;
@@ -26,6 +27,7 @@ type ToolbarProps = {
 export function Toolbar({
   currentPage,
   dirtyCount,
+  fontOptions,
   isExporting,
   pageCount,
   selectedTextBlock,
@@ -59,6 +61,19 @@ export function Toolbar({
   const isItalic = selectedTextBlock?.fontStyle === "italic";
   const isUnderline = Boolean(selectedTextBlock?.underline);
   const isStrikeThrough = Boolean(selectedTextBlock?.strikeThrough);
+  const selectedFontOption = selectedTextBlock
+    ? fontOptions.find((option) => option.fontName === selectedTextBlock.fontName)
+    : undefined;
+
+  const handleFontChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const option = fontOptions.find((fontOption) => fontOption.fontName === event.target.value);
+    if (!option || !selectedTextBlock) return;
+
+    onFormatChange(selectedTextBlock.id, {
+      fontName: option.fontName,
+      fontFamily: option.fontFamily,
+    });
+  };
 
   return (
     <header className="toolbar">
@@ -97,6 +112,27 @@ export function Toolbar({
       </div>
 
       <div className="toolbar-group toolbar-center">
+        <label className="font-select-wrap" title="Font family">
+          <span className="sr-only">Font family</span>
+          <select
+            className="font-select"
+            value={selectedTextBlock?.fontName ?? ""}
+            onChange={handleFontChange}
+            disabled={!hasSelection || isExporting}
+            style={{ fontFamily: selectedFontOption?.fontFamily }}
+          >
+            <option value="" disabled>
+              Auto font
+            </option>
+            {fontOptions.map((option) => (
+              <option key={`${option.source}-${option.fontName}`} value={option.fontName} style={{ fontFamily: option.fontFamily }}>
+                {option.source === "detected" ? "PDF: " : ""}
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="toolbar-divider" />
         <button
           className={`icon-button ${isBold ? "is-active" : ""}`}
           type="button"

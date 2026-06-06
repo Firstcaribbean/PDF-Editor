@@ -135,6 +135,7 @@ export function PDFEditorClient() {
       <Toolbar
         currentPage={editor.activePageIndex}
         dirtyCount={dirtyCount}
+        fontOptions={editor.fontOptions}
         isExporting={editor.isExporting}
         pageCount={editor.documentModel.pageCount}
         selectedTextBlock={editor.selectedTextBlock}

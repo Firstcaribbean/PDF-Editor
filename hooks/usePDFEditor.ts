@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { extractPDFDocument } from "@/lib/extractTextBlocks";
 import { rebuildPDF } from "@/lib/rebuildPDF";
-import type { EditorDocumentModel, EditorTextBlock, ImageReplacement, RGBColor } from "@/lib/types";
+import type { EditorDocumentModel, EditorFontOption, EditorTextBlock, ImageReplacement, RGBColor } from "@/lib/types";
 
 type EditorStatus = "idle" | "loading" | "ready" | "error";
 
@@ -12,11 +12,38 @@ type BackgroundSample = {
   color: RGBColor;
 };
 
-type TextFormatPatch = Partial<Pick<EditorTextBlock, "fontWeight" | "fontStyle" | "underline" | "strikeThrough">>;
+type TextFormatPatch = Partial<
+  Pick<EditorTextBlock, "fontName" | "fontFamily" | "fontWeight" | "fontStyle" | "underline" | "strikeThrough">
+>;
+
+const loadedFontFaces = new Set<string>();
+
+const standardFontOptions: EditorFontOption[] = [
+  {
+    fontName: "standard:Helvetica",
+    fontFamily: 'Arial, Helvetica, "Liberation Sans", sans-serif',
+    label: "Helvetica / Arial",
+    source: "standard",
+  },
+  {
+    fontName: "standard:Times-Roman",
+    fontFamily: '"Times New Roman", Times, serif',
+    label: "Times New Roman",
+    source: "standard",
+  },
+  {
+    fontName: "standard:Courier",
+    fontFamily: '"Courier New", Courier, monospace',
+    label: "Courier New",
+    source: "standard",
+  },
+];
 
 function isTextBlockDirty(block: EditorTextBlock) {
   return (
     block.text !== block.originalText ||
+    block.fontName !== block.originalFontName ||
+    block.fontFamily !== block.originalFontFamily ||
     block.fontWeight !== block.originalFontWeight ||
     block.fontStyle !== block.originalFontStyle ||
     block.underline !== block.originalUnderline ||
@@ -36,6 +63,119 @@ function downloadBytes(bytes: Uint8Array, fileName: string) {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+function copyBytesToArrayBuffer(bytes: Uint8Array) {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
+function quoteFontFamily(fontFamily: string) {
+  return `"${fontFamily.replace(/["\\]/g, "")}"`;
+}
+
+function makeRuntimeFontFamily(document: EditorDocumentModel, fontName: string) {
+  const seed = `${document.fingerprint ?? document.fileName}-${fontName}`;
+  return `PDF_${seed.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+async function registerEmbeddedFonts(document: EditorDocumentModel) {
+  if (typeof window === "undefined" || typeof FontFace === "undefined" || !("fonts" in window.document)) {
+    return document;
+  }
+
+  const fontStacks = new Map<string, string>();
+
+  await Promise.all(
+    Object.entries(document.fonts).map(async ([fontName, resource]) => {
+      if (!resource.bytes?.length) return;
+
+      const runtimeFamily = makeRuntimeFontFamily(document, fontName);
+      const cssRuntimeFamily = quoteFontFamily(runtimeFamily);
+
+      try {
+        if (!loadedFontFaces.has(runtimeFamily)) {
+          const fontFace = new FontFace(runtimeFamily, copyBytesToArrayBuffer(resource.bytes));
+          await fontFace.load();
+          window.document.fonts.add(fontFace);
+          loadedFontFaces.add(runtimeFamily);
+        }
+
+        const fallbackStack = resource.cssFamily?.trim() || "Arial, Helvetica, sans-serif";
+        fontStacks.set(fontName, `${cssRuntimeFamily}, ${fallbackStack}`);
+      } catch {
+        fontStacks.set(fontName, resource.cssFamily?.trim() || "Arial, Helvetica, sans-serif");
+      }
+    }),
+  );
+
+  if (!fontStacks.size) return document;
+
+  return {
+    ...document,
+    fonts: Object.fromEntries(
+      Object.entries(document.fonts).map(([fontName, resource]) => [
+        fontName,
+        fontStacks.has(fontName) ? { ...resource, cssFamily: fontStacks.get(fontName) } : resource,
+      ]),
+    ),
+    pages: document.pages.map((page) => ({
+      ...page,
+      textBlocks: page.textBlocks.map((block) => {
+        const fontFamily = fontStacks.get(block.fontName);
+        return fontFamily
+          ? {
+              ...block,
+              fontFamily,
+              originalFontFamily: fontFamily,
+            }
+          : block;
+      }),
+    })),
+  } satisfies EditorDocumentModel;
+}
+
+function cleanFontLabel(value: string) {
+  return value
+    .replace(/^[A-Z]{6}\+/, "")
+    .replace(/^PDF_/, "")
+    .replace(/["']/g, "")
+    .replace(/\s*,\s*(serif|sans-serif|monospace).*$/i, "")
+    .replace(/[-_]+/g, " ")
+    .trim();
+}
+
+function getFontLabel(block: EditorTextBlock, document: EditorDocumentModel) {
+  const resource = document.fonts[block.fontName];
+  return (
+    cleanFontLabel(resource?.originalName ?? "") ||
+    cleanFontLabel(resource?.fallbackName ?? "") ||
+    cleanFontLabel(resource?.cssFamily ?? "") ||
+    cleanFontLabel(block.originalFontFamily) ||
+    cleanFontLabel(block.fontName) ||
+    "Detected font"
+  );
+}
+
+function buildFontOptions(document: EditorDocumentModel | null): EditorFontOption[] {
+  if (!document) return standardFontOptions;
+
+  const seen = new Set<string>();
+  const detected: EditorFontOption[] = [];
+
+  for (const block of document.pages.flatMap((page) => page.textBlocks)) {
+    if (seen.has(block.originalFontName)) continue;
+    seen.add(block.originalFontName);
+    detected.push({
+      fontName: block.originalFontName,
+      fontFamily: block.originalFontFamily,
+      label: getFontLabel(block, document),
+      source: "detected",
+    });
+  }
+
+  return [...detected.sort((a, b) => a.label.localeCompare(b.label)), ...standardFontOptions];
 }
 
 export function usePDFEditor() {
@@ -61,6 +201,8 @@ export function usePDFEditor() {
     return documentModel?.pages.flatMap((page) => page.textBlocks).find((block) => block.id === selectedBlockId) ?? null;
   }, [documentModel, selectedBlockId]);
 
+  const fontOptions = useMemo(() => buildFontOptions(documentModel), [documentModel]);
+
   const loadBytes = useCallback(async (bytes: ArrayBuffer | Uint8Array, fileName: string) => {
     setStatus("loading");
     setError(null);
@@ -69,8 +211,9 @@ export function usePDFEditor() {
 
     try {
       const loaded = await extractPDFDocument(bytes, fileName);
+      const documentWithFonts = await registerEmbeddedFonts(loaded.document);
       pdfRef.current = loaded.pdf;
-      setDocumentModel(loaded.document);
+      setDocumentModel(documentWithFonts);
       setStatus("ready");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "The PDF could not be opened.";
@@ -140,6 +283,8 @@ export function usePDFEditor() {
               ? {
                   ...block,
                   text: block.originalText,
+                  fontName: block.originalFontName,
+                  fontFamily: block.originalFontFamily,
                   fontWeight: block.originalFontWeight,
                   fontStyle: block.originalFontStyle,
                   underline: block.originalUnderline,
@@ -186,6 +331,8 @@ export function usePDFEditor() {
           textBlocks: page.textBlocks.map((block) => ({
             ...block,
             text: block.originalText,
+            fontName: block.originalFontName,
+            fontFamily: block.originalFontFamily,
             fontWeight: block.originalFontWeight,
             fontStyle: block.originalFontStyle,
             underline: block.originalUnderline,
@@ -268,6 +415,7 @@ export function usePDFEditor() {
     documentModel,
     error,
     isExporting,
+    fontOptions,
     pdf: pdfRef.current,
     selectedBlockId,
     selectedTextBlock,
