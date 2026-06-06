@@ -960,6 +960,12 @@ button {
   gap: 8px;
 }
 
+.text-style-row {
+  display: grid;
+  grid-template-columns: repeat(4, 38px);
+  gap: 8px;
+}
+
 .field-row {
   display: grid;
   grid-template-columns: 72px 1fr;
@@ -1017,7 +1023,26 @@ button {
 }
 
 .fabric-canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
   background: white;
+  box-shadow: 0 16px 46px rgba(22, 24, 19, 0.18);
+  touch-action: none;
+  cursor: default;
+}
+
+.fabric-canvas.tool-draw,
+.fabric-canvas.tool-rect,
+.fabric-canvas.tool-circle,
+.fabric-canvas.tool-line,
+.fabric-canvas.tool-text {
+  cursor: crosshair;
+}
+
+.fabric-canvas:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
 }
 
 .image-canvas-wrap .canvas-container {

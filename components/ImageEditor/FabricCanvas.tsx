@@ -28,9 +28,20 @@ export function FabricCanvas({
         onChange={(event) => {
           const file = event.currentTarget.files?.[0];
           if (file) void editor.loadImage(file);
+          event.currentTarget.value = "";
         }}
       />
-      <canvas ref={editor.canvasElementRef} className="fabric-canvas" />
+      <canvas
+        ref={editor.canvasElementRef}
+        className={`fabric-canvas tool-${editor.tool}`}
+        tabIndex={0}
+        onPointerDown={editor.handlePointerDown}
+        onPointerMove={editor.handlePointerMove}
+        onPointerUp={editor.handlePointerUp}
+        onPointerCancel={editor.handlePointerUp}
+        onDoubleClick={editor.handleDoubleClick}
+        aria-label="Image editing canvas"
+      />
     </section>
   );
 }
