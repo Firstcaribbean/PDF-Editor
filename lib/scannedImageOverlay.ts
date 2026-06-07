@@ -10,7 +10,7 @@ type BBox = {
   y1: number;
 };
 
-type OcrLine = {
+type OcrBox = {
   text: string;
   confidence?: number;
   bbox: BBox;
@@ -44,18 +44,25 @@ function normalizeOcrText(text: string) {
   return text.replace(/\s+/g, " ").trim();
 }
 
-function lineToTextBlock(line: OcrLine, index: number, layout: ImagePdfLayout): EditorTextBlock | null {
-  const text = normalizeOcrText(line.text);
-  if (!text || text.length < 2) return null;
-  if ((line.confidence ?? 80) < 20) return null;
+function hasUsefulText(text: string) {
+  return /[a-z0-9]/i.test(text);
+}
 
-  const rawPaddingX = Math.max(4, bboxHeight(line.bbox) * 0.2);
-  const rawPaddingY = Math.max(3, bboxHeight(line.bbox) * 0.12);
+function ocrBoxToTextBlock(box: OcrBox, index: number, layout: ImagePdfLayout): EditorTextBlock | null {
+  const text = normalizeOcrText(box.text);
+  if (!text || !hasUsefulText(text)) return null;
+
+  const confidence = box.confidence ?? 80;
+  const isShortNumber = /^\d{1,2}$/.test(text);
+  if (confidence < (isShortNumber ? 10 : 18)) return null;
+
+  const rawPaddingX = Math.max(2, bboxHeight(box.bbox) * 0.12);
+  const rawPaddingY = Math.max(2, bboxHeight(box.bbox) * 0.1);
   const mapped = mapImageRectToPdfPage(layout, {
-    left: line.bbox.x0 - rawPaddingX,
-    top: line.bbox.y0 - rawPaddingY,
-    width: bboxWidth(line.bbox) + rawPaddingX * 2,
-    height: bboxHeight(line.bbox) + rawPaddingY * 2,
+    left: box.bbox.x0 - rawPaddingX,
+    top: box.bbox.y0 - rawPaddingY,
+    width: bboxWidth(box.bbox) + rawPaddingX * 2,
+    height: bboxHeight(box.bbox) + rawPaddingY * 2,
   });
   const fontSize = clamp(mapped.screen.height * 0.78, 6, 42);
   const ascent = 0.8;
@@ -96,26 +103,28 @@ function lineToTextBlock(line: OcrLine, index: number, layout: ImagePdfLayout): 
   };
 }
 
-function getOcrLines(result: Tesseract.RecognizeResult): OcrLine[] {
-  const lines: OcrLine[] = [];
+function getOcrWords(result: Tesseract.RecognizeResult): OcrBox[] {
+  const words: OcrBox[] = [];
 
   for (const block of result.data.blocks ?? []) {
     for (const paragraph of block.paragraphs ?? []) {
       for (const line of paragraph.lines ?? []) {
-        if (!line.bbox) continue;
-        lines.push({
-          text: line.text,
-          confidence: line.confidence,
-          bbox: line.bbox,
-        });
+        for (const word of line.words ?? []) {
+          if (!word.bbox) continue;
+          words.push({
+            text: word.text,
+            confidence: word.confidence,
+            bbox: word.bbox,
+          });
+        }
       }
     }
   }
 
-  return lines;
+  return words;
 }
 
-function parseTsvLines(tsv?: string | null): OcrLine[] {
+function parseTsvWords(tsv?: string | null): OcrBox[] {
   if (!tsv) return [];
 
   const rows = tsv.trim().split(/\r?\n/);
@@ -135,51 +144,34 @@ function parseTsvLines(tsv?: string | null): OcrLine[] {
 
   if (Object.values(indexes).some((index) => index < 0)) return [];
 
-  const grouped = new Map<string, { words: string[]; confidences: number[]; bbox: BBox }>();
+  const words: OcrBox[] = [];
 
   for (const row of rows) {
     const cells = row.split("\t");
     const text = normalizeOcrText(cells[indexes.text] ?? "");
     const confidence = Number(cells[indexes.confidence]);
-    if (!text || confidence < 15) continue;
+    if (!text || !hasUsefulText(text) || confidence < 10) continue;
 
     const left = Number(cells[indexes.left]);
     const top = Number(cells[indexes.top]);
     const width = Number(cells[indexes.width]);
     const height = Number(cells[indexes.height]);
     if (![left, top, width, height].every(Number.isFinite)) continue;
+    if (width <= 0 || height <= 0) continue;
 
-    const key = `${cells[indexes.block]}:${cells[indexes.paragraph]}:${cells[indexes.line]}`;
-    const existing = grouped.get(key);
-
-    if (existing) {
-      existing.words.push(text);
-      existing.confidences.push(confidence);
-      existing.bbox = {
-        x0: Math.min(existing.bbox.x0, left),
-        y0: Math.min(existing.bbox.y0, top),
-        x1: Math.max(existing.bbox.x1, left + width),
-        y1: Math.max(existing.bbox.y1, top + height),
-      };
-    } else {
-      grouped.set(key, {
-        words: [text],
-        confidences: [confidence],
-        bbox: {
-          x0: left,
-          y0: top,
-          x1: left + width,
-          y1: top + height,
-        },
-      });
-    }
+    words.push({
+      text,
+      confidence,
+      bbox: {
+        x0: left,
+        y0: top,
+        x1: left + width,
+        y1: top + height,
+      },
+    });
   }
 
-  return Array.from(grouped.values()).map((line) => ({
-    text: line.words.join(" "),
-    confidence: line.confidences.reduce((total, value) => total + value, 0) / Math.max(1, line.confidences.length),
-    bbox: line.bbox,
-  }));
+  return words;
 }
 
 function isInkPixel(data: Uint8ClampedArray, offset: number) {
@@ -342,11 +334,11 @@ export async function createScannedImageOverlay(file: File): Promise<EditorDocum
     recognizeWithLayout(file),
   ]);
   const layout = getImagePdfLayout(canvas.width, canvas.height);
-  const ocrLines = getOcrLines(result);
-  const lines = ocrLines.length ? ocrLines : parseTsvLines(result.data.tsv);
+  const ocrWords = getOcrWords(result);
+  const words = ocrWords.length ? ocrWords : parseTsvWords(result.data.tsv);
 
-  const textBlocks = lines
-    .map((line, index) => lineToTextBlock(line, index, layout))
+  const textBlocks = words
+    .map((word, index) => ocrBoxToTextBlock(word, index, layout))
     .filter(Boolean) as EditorTextBlock[];
 
   return {
