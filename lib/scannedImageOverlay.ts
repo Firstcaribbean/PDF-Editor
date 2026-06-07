@@ -14,11 +14,32 @@ type OcrBox = {
   text: string;
   confidence?: number;
   bbox: BBox;
+  fontName?: string;
 };
 
-const ocrFont = {
-  fontName: "standard:Times-Roman",
-  fontFamily: '"Times New Roman", Times, serif',
+type OcrVisualMetrics = {
+  inkRatio: number;
+  darkRatio: number;
+};
+
+type OcrPageProfile = {
+  medianHeight: number;
+  medianInkRatio: number;
+};
+
+const ocrFonts = {
+  serif: {
+    fontName: "standard:Times-Roman",
+    fontFamily: '"Times New Roman", Times, Georgia, serif',
+  },
+  sans: {
+    fontName: "standard:Helvetica",
+    fontFamily: 'Arial, Helvetica, "Liberation Sans", sans-serif',
+  },
+  mono: {
+    fontName: "standard:Courier",
+    fontFamily: '"Courier New", Courier, monospace',
+  },
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -40,6 +61,14 @@ function looksBold(text: string) {
   return text.includes(":") || (letters.length >= 3 && uppercaseLetters.length / letters.length > 0.65);
 }
 
+function median(values: number[], fallback: number) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return fallback;
+
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
 function normalizeOcrText(text: string) {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -48,7 +77,84 @@ function hasUsefulText(text: string) {
   return /[a-z0-9]/i.test(text);
 }
 
-function ocrBoxToTextBlock(box: OcrBox, index: number, layout: ImagePdfLayout): EditorTextBlock | null {
+function getOcrFont(box: OcrBox) {
+  const hint = `${box.fontName ?? ""} ${box.text}`.toLowerCase();
+
+  if (hint.includes("courier") || hint.includes("mono")) return ocrFonts.mono;
+  if (hint.includes("arial") || hint.includes("helvetica") || hint.includes("calibri") || hint.includes("sans")) {
+    return ocrFonts.sans;
+  }
+
+  return ocrFonts.serif;
+}
+
+function getTextVisualMetrics(canvas: HTMLCanvasElement, bbox: BBox): OcrVisualMetrics {
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return { inkRatio: 0, darkRatio: 0 };
+
+  const left = clamp(Math.floor(bbox.x0), 0, canvas.width - 1);
+  const top = clamp(Math.floor(bbox.y0), 0, canvas.height - 1);
+  const right = clamp(Math.ceil(bbox.x1), left + 1, canvas.width);
+  const bottom = clamp(Math.ceil(bbox.y1), top + 1, canvas.height);
+  const width = right - left;
+  const height = bottom - top;
+  const imageData = context.getImageData(left, top, width, height);
+  let inkPixels = 0;
+  let darkPixels = 0;
+
+  for (let index = 0; index < imageData.data.length; index += 4) {
+    const alpha = imageData.data[index + 3];
+    if (alpha < 40) continue;
+
+    const red = imageData.data[index] / 255;
+    const green = imageData.data[index + 1] / 255;
+    const blue = imageData.data[index + 2] / 255;
+    const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    const contrast = Math.max(red, green, blue) - Math.min(red, green, blue);
+
+    if (luminance < 0.72 || (contrast > 0.12 && luminance < 0.86)) {
+      inkPixels += 1;
+    }
+
+    if (luminance < 0.42) {
+      darkPixels += 1;
+    }
+  }
+
+  const area = Math.max(1, width * height);
+  return {
+    inkRatio: inkPixels / area,
+    darkRatio: darkPixels / area,
+  };
+}
+
+function buildOcrPageProfile(canvas: HTMLCanvasElement, boxes: OcrBox[]): OcrPageProfile {
+  const usefulBoxes = boxes.filter((box) => hasUsefulText(normalizeOcrText(box.text)));
+  const heights = usefulBoxes.map((box) => bboxHeight(box.bbox));
+  const inkRatios = usefulBoxes.map((box) => getTextVisualMetrics(canvas, box.bbox).inkRatio);
+
+  return {
+    medianHeight: median(heights, 14),
+    medianInkRatio: median(inkRatios, 0.12),
+  };
+}
+
+function inferOcrFontWeight(text: string, box: OcrBox, metrics: OcrVisualMetrics, profile: OcrPageProfile) {
+  const height = bboxHeight(box.bbox);
+  const isLargeText = height > profile.medianHeight * 1.14;
+  const isInkHeavy = metrics.inkRatio > Math.max(0.14, profile.medianInkRatio * 1.18) || metrics.darkRatio > 0.08;
+
+  if (looksBold(text) || isLargeText || isInkHeavy) return "700";
+  return "400";
+}
+
+function ocrBoxToTextBlock(
+  box: OcrBox,
+  index: number,
+  layout: ImagePdfLayout,
+  profile: OcrPageProfile,
+  metrics: OcrVisualMetrics,
+): EditorTextBlock | null {
   const text = normalizeOcrText(box.text);
   if (!text || !hasUsefulText(text)) return null;
 
@@ -64,9 +170,12 @@ function ocrBoxToTextBlock(box: OcrBox, index: number, layout: ImagePdfLayout): 
     width: bboxWidth(box.bbox) + rawPaddingX * 2,
     height: bboxHeight(box.bbox) + rawPaddingY * 2,
   });
-  const fontSize = clamp(mapped.screen.height * 0.78, 6, 42);
+  const contentHeight = bboxHeight(box.bbox) * layout.scale;
+  const fontSize = clamp(contentHeight * 1.08, 6, 48);
   const ascent = 0.8;
   const descent = -0.2;
+  const font = getOcrFont(box);
+  const fontWeight = inferOcrFontWeight(text, box, metrics, profile);
 
   return {
     id: `p1-ocr-t${index}`,
@@ -77,19 +186,19 @@ function ocrBoxToTextBlock(box: OcrBox, index: number, layout: ImagePdfLayout): 
     screen: mapped.screen,
     pdf: {
       ...mapped.pdf,
-      y: mapped.pdf.y + fontSize * 0.2,
+      y: mapped.pdf.y + rawPaddingY * layout.scale + fontSize * 0.08,
     },
-    fontName: ocrFont.fontName,
-    originalFontName: ocrFont.fontName,
-    fontFamily: ocrFont.fontFamily,
-    originalFontFamily: ocrFont.fontFamily,
+    fontName: font.fontName,
+    originalFontName: font.fontName,
+    fontFamily: font.fontFamily,
+    originalFontFamily: font.fontFamily,
     fontSize,
     pdfFontSize: fontSize,
     ascent,
     descent,
     horizontalScale: 1,
-    fontWeight: looksBold(text) ? "700" : "400",
-    originalFontWeight: looksBold(text) ? "700" : "400",
+    fontWeight,
+    originalFontWeight: fontWeight,
     fontStyle: "normal",
     originalFontStyle: "normal",
     underline: false,
@@ -115,6 +224,7 @@ function getOcrWords(result: Tesseract.RecognizeResult): OcrBox[] {
             text: word.text,
             confidence: word.confidence,
             bbox: word.bbox,
+            fontName: word.font_name,
           });
         }
       }
@@ -336,9 +446,10 @@ export async function createScannedImageOverlay(file: File): Promise<EditorDocum
   const layout = getImagePdfLayout(canvas.width, canvas.height);
   const ocrWords = getOcrWords(result);
   const words = ocrWords.length ? ocrWords : parseTsvWords(result.data.tsv);
+  const profile = buildOcrPageProfile(canvas, words);
 
   const textBlocks = words
-    .map((word, index) => ocrBoxToTextBlock(word, index, layout))
+    .map((word, index) => ocrBoxToTextBlock(word, index, layout, profile, getTextVisualMetrics(canvas, word.bbox)))
     .filter(Boolean) as EditorTextBlock[];
 
   return {

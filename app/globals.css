@@ -643,14 +643,19 @@ button {
 }
 
 .editable-block.is-ocr {
-  border-color: rgba(11, 118, 110, 0.2);
-  background: rgba(11, 118, 110, 0.025);
+  border-color: transparent;
+  background: transparent;
 }
 
 .editable-block:focus,
 .editable-block.is-selected,
 .editable-block.is-dirty {
   color: var(--block-color);
+}
+
+.editable-block.is-ocr:not(.is-dirty):focus,
+.editable-block.is-ocr:not(.is-dirty).is-selected {
+  color: transparent;
 }
 
 .editable-block:focus,
