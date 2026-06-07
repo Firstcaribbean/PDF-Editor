@@ -642,6 +642,11 @@ button {
   border-color: rgba(11, 118, 110, 0.42);
 }
 
+.editable-block.is-ocr {
+  border-color: rgba(11, 118, 110, 0.2);
+  background: rgba(11, 118, 110, 0.025);
+}
+
 .editable-block:focus,
 .editable-block.is-selected,
 .editable-block.is-dirty {

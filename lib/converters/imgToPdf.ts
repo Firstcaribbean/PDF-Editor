@@ -1,5 +1,6 @@
 import { PDFDocument } from "pdf-lib";
 import { canvasToJpegBlob, fileToImageCanvas, ProgressCallback, uint8ArrayToArrayBuffer } from "@/lib/converters/shared";
+import { getImagePdfLayout } from "@/lib/imagePdfLayout";
 
 export async function imagesToPdf(files: File[], onProgress?: ProgressCallback) {
   const pdfDoc = await PDFDocument.create();
@@ -10,8 +11,14 @@ export async function imagesToPdf(files: File[], onProgress?: ProgressCallback) 
     const jpegBlob = await canvasToJpegBlob(canvas);
     const jpegBytes = await jpegBlob.arrayBuffer();
     const image = await pdfDoc.embedJpg(jpegBytes);
-    const page = pdfDoc.addPage([image.width, image.height]);
-    page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+    const layout = getImagePdfLayout(image.width, image.height);
+    const page = pdfDoc.addPage([layout.pageWidth, layout.pageHeight]);
+    page.drawImage(image, {
+      x: layout.imageLeft,
+      y: layout.pageHeight - layout.imageTop - layout.imageHeight,
+      width: layout.imageWidth,
+      height: layout.imageHeight,
+    });
   }
 
   onProgress?.(90, "Saving PDF");

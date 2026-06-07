@@ -32,6 +32,7 @@ function EditableTextBlock({
   onSelect: (blockId: string | null) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const isOcrBlock = block.id.includes("-ocr-");
 
   useLayoutEffect(() => {
     if (ref.current) {
@@ -82,7 +83,7 @@ function EditableTextBlock({
   return (
     <div
       ref={ref}
-      className={`editable-block ${block.dirty ? "is-dirty" : ""} ${isSelected ? "is-selected" : ""}`}
+      className={`editable-block ${isOcrBlock ? "is-ocr" : ""} ${block.dirty ? "is-dirty" : ""} ${isSelected ? "is-selected" : ""}`}
       contentEditable
       role="textbox"
       aria-label={`Text on page ${block.pageNumber}`}

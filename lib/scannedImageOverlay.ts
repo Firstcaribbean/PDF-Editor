@@ -1,5 +1,6 @@
 import Tesseract from "tesseract.js";
 import { fileToImageCanvas } from "@/lib/converters/shared";
+import { getImagePdfLayout, mapImageRectToPdfPage, type ImagePdfLayout } from "@/lib/imagePdfLayout";
 import type { EditorDocumentOverlay, EditorImageBlock, EditorTextBlock } from "@/lib/types";
 
 type BBox = {
@@ -43,16 +44,20 @@ function normalizeOcrText(text: string) {
   return text.replace(/\s+/g, " ").trim();
 }
 
-function lineToTextBlock(line: OcrLine, index: number, pageWidth: number, pageHeight: number): EditorTextBlock | null {
+function lineToTextBlock(line: OcrLine, index: number, layout: ImagePdfLayout): EditorTextBlock | null {
   const text = normalizeOcrText(line.text);
   if (!text || text.length < 2) return null;
-  if ((line.confidence ?? 80) < 32) return null;
+  if ((line.confidence ?? 80) < 20) return null;
 
-  const left = clamp(line.bbox.x0, 0, pageWidth - 1);
-  const top = clamp(line.bbox.y0, 0, pageHeight - 1);
-  const width = clamp(bboxWidth(line.bbox), 4, pageWidth - left);
-  const height = clamp(bboxHeight(line.bbox), 4, pageHeight - top);
-  const fontSize = clamp(height * 0.82, 8, 96);
+  const rawPaddingX = Math.max(4, bboxHeight(line.bbox) * 0.2);
+  const rawPaddingY = Math.max(3, bboxHeight(line.bbox) * 0.12);
+  const mapped = mapImageRectToPdfPage(layout, {
+    left: line.bbox.x0 - rawPaddingX,
+    top: line.bbox.y0 - rawPaddingY,
+    width: bboxWidth(line.bbox) + rawPaddingX * 2,
+    height: bboxHeight(line.bbox) + rawPaddingY * 2,
+  });
+  const fontSize = clamp(mapped.screen.height * 0.78, 6, 42);
   const ascent = 0.8;
   const descent = -0.2;
 
@@ -62,17 +67,10 @@ function lineToTextBlock(line: OcrLine, index: number, pageWidth: number, pageHe
     pageNumber: 1,
     text,
     originalText: text,
-    screen: {
-      left,
-      top,
-      width,
-      height,
-    },
+    screen: mapped.screen,
     pdf: {
-      x: left,
-      y: pageHeight - top - height + fontSize * 0.2,
-      width,
-      height,
+      ...mapped.pdf,
+      y: mapped.pdf.y + fontSize * 0.2,
     },
     fontName: ocrFont.fontName,
     originalFontName: ocrFont.fontName,
@@ -117,6 +115,73 @@ function getOcrLines(result: Tesseract.RecognizeResult): OcrLine[] {
   return lines;
 }
 
+function parseTsvLines(tsv?: string | null): OcrLine[] {
+  if (!tsv) return [];
+
+  const rows = tsv.trim().split(/\r?\n/);
+  const header = rows.shift()?.split("\t") ?? [];
+  const indexOf = (name: string) => header.indexOf(name);
+  const indexes = {
+    block: indexOf("block_num"),
+    confidence: indexOf("conf"),
+    height: indexOf("height"),
+    left: indexOf("left"),
+    line: indexOf("line_num"),
+    paragraph: indexOf("par_num"),
+    text: indexOf("text"),
+    top: indexOf("top"),
+    width: indexOf("width"),
+  };
+
+  if (Object.values(indexes).some((index) => index < 0)) return [];
+
+  const grouped = new Map<string, { words: string[]; confidences: number[]; bbox: BBox }>();
+
+  for (const row of rows) {
+    const cells = row.split("\t");
+    const text = normalizeOcrText(cells[indexes.text] ?? "");
+    const confidence = Number(cells[indexes.confidence]);
+    if (!text || confidence < 15) continue;
+
+    const left = Number(cells[indexes.left]);
+    const top = Number(cells[indexes.top]);
+    const width = Number(cells[indexes.width]);
+    const height = Number(cells[indexes.height]);
+    if (![left, top, width, height].every(Number.isFinite)) continue;
+
+    const key = `${cells[indexes.block]}:${cells[indexes.paragraph]}:${cells[indexes.line]}`;
+    const existing = grouped.get(key);
+
+    if (existing) {
+      existing.words.push(text);
+      existing.confidences.push(confidence);
+      existing.bbox = {
+        x0: Math.min(existing.bbox.x0, left),
+        y0: Math.min(existing.bbox.y0, top),
+        x1: Math.max(existing.bbox.x1, left + width),
+        y1: Math.max(existing.bbox.y1, top + height),
+      };
+    } else {
+      grouped.set(key, {
+        words: [text],
+        confidences: [confidence],
+        bbox: {
+          x0: left,
+          y0: top,
+          x1: left + width,
+          y1: top + height,
+        },
+      });
+    }
+  }
+
+  return Array.from(grouped.values()).map((line) => ({
+    text: line.words.join(" "),
+    confidence: line.confidences.reduce((total, value) => total + value, 0) / Math.max(1, line.confidences.length),
+    bbox: line.bbox,
+  }));
+}
+
 function isInkPixel(data: Uint8ClampedArray, offset: number) {
   const alpha = data[offset + 3];
   if (alpha < 40) return false;
@@ -133,46 +198,38 @@ function isInkPixel(data: Uint8ClampedArray, offset: number) {
 function componentToImageBlock({
   box,
   index,
-  pageHeight,
-  pageWidth,
+  layout,
   scale,
 }: {
   box: { minX: number; minY: number; maxX: number; maxY: number };
   index: number;
-  pageHeight: number;
-  pageWidth: number;
+  layout: ImagePdfLayout;
   scale: number;
 }): EditorImageBlock {
   const padding = 6 / scale;
-  const left = clamp(box.minX / scale - padding, 0, pageWidth - 1);
-  const top = clamp(box.minY / scale - padding, 0, pageHeight - 1);
-  const right = clamp((box.maxX + 1) / scale + padding, left + 1, pageWidth);
-  const bottom = clamp((box.maxY + 1) / scale + padding, top + 1, pageHeight);
-  const width = right - left;
-  const height = bottom - top;
+  const left = box.minX / scale - padding;
+  const top = box.minY / scale - padding;
+  const right = (box.maxX + 1) / scale + padding;
+  const bottom = (box.maxY + 1) / scale + padding;
+  const mapped = mapImageRectToPdfPage(layout, {
+    left,
+    top,
+    width: right - left,
+    height: bottom - top,
+  });
 
   return {
     id: `p1-ocr-i${index}`,
     pageIndex: 0,
     pageNumber: 1,
-    screen: {
-      left,
-      top,
-      width,
-      height,
-    },
-    pdf: {
-      x: left,
-      y: pageHeight - top - height,
-      width,
-      height,
-    },
+    screen: mapped.screen,
+    pdf: mapped.pdf,
     rotation: 0,
     dirty: false,
   };
 }
 
-function detectImageRegions(canvas: HTMLCanvasElement): EditorImageBlock[] {
+function detectImageRegions(canvas: HTMLCanvasElement, layout: ImagePdfLayout): EditorImageBlock[] {
   const maxScanSide = 900;
   const scale = Math.min(1, maxScanSide / Math.max(canvas.width, canvas.height));
   const scanCanvas = document.createElement("canvas");
@@ -235,7 +292,7 @@ function detectImageRegions(canvas: HTMLCanvasElement): EditorImageBlock[] {
         originalHeight >= 45 &&
         originalAreaRatio > 0.002 &&
         originalAreaRatio < 0.25 &&
-        density > 0.08 &&
+        density > 0.16 &&
         aspect < 7 &&
         aspect > 0.15
       ) {
@@ -251,21 +308,45 @@ function detectImageRegions(canvas: HTMLCanvasElement): EditorImageBlock[] {
       componentToImageBlock({
         box,
         index,
-        pageHeight: canvas.height,
-        pageWidth: canvas.width,
+        layout,
         scale,
       }),
     );
 }
 
+async function recognizeWithLayout(file: File) {
+  const worker = await Tesseract.createWorker("eng");
+
+  try {
+    await worker.setParameters({
+      preserve_interword_spaces: "1",
+      tessedit_pageseg_mode: Tesseract.PSM.AUTO,
+    });
+    return await worker.recognize(
+      file,
+      {},
+      {
+        text: true,
+        blocks: true,
+        tsv: true,
+      },
+    );
+  } finally {
+    await worker.terminate();
+  }
+}
+
 export async function createScannedImageOverlay(file: File): Promise<EditorDocumentOverlay> {
   const [canvas, result] = await Promise.all([
     fileToImageCanvas(file, "#ffffff"),
-    Tesseract.recognize(file, "eng"),
+    recognizeWithLayout(file),
   ]);
+  const layout = getImagePdfLayout(canvas.width, canvas.height);
+  const ocrLines = getOcrLines(result);
+  const lines = ocrLines.length ? ocrLines : parseTsvLines(result.data.tsv);
 
-  const textBlocks = getOcrLines(result)
-    .map((line, index) => lineToTextBlock(line, index, canvas.width, canvas.height))
+  const textBlocks = lines
+    .map((line, index) => lineToTextBlock(line, index, layout))
     .filter(Boolean) as EditorTextBlock[];
 
   return {
@@ -273,7 +354,7 @@ export async function createScannedImageOverlay(file: File): Promise<EditorDocum
       {
         pageIndex: 0,
         textBlocks,
-        imageBlocks: detectImageRegions(canvas),
+        imageBlocks: detectImageRegions(canvas, layout),
       },
     ],
   };
