@@ -1,4 +1,4 @@
-import type { StoredPDFDocument } from "@/lib/types";
+import type { EditorDocumentOverlay, StoredPDFDocument } from "@/lib/types";
 
 const DB_NAME = "inline-pdf-editor";
 const DB_VERSION = 1;
@@ -24,7 +24,11 @@ export async function storePDFFile(file: File) {
   return storePDFBytes(await file.arrayBuffer(), file.name);
 }
 
-export async function storePDFBytes(bytes: ArrayBuffer, fileName: string, options?: { downloadable?: boolean }) {
+export async function storePDFBytes(
+  bytes: ArrayBuffer,
+  fileName: string,
+  options?: { downloadable?: boolean; overlay?: EditorDocumentOverlay },
+) {
   const db = await openDatabase();
   const id = `${Date.now()}-${crypto.randomUUID()}`;
   const record: StoredPDFDocument = {
@@ -33,6 +37,7 @@ export async function storePDFBytes(bytes: ArrayBuffer, fileName: string, option
     bytes,
     createdAt: Date.now(),
     downloadable: options?.downloadable,
+    overlay: options?.overlay,
     size: bytes.byteLength,
   };
 

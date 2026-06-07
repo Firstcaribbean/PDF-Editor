@@ -5,7 +5,7 @@ import { PDFDocument } from "pdf-lib";
 import { extractPDFDocument } from "@/lib/extractTextBlocks";
 import { rebuildPDF } from "@/lib/rebuildPDF";
 import { preparePDFEditorInputs } from "@/lib/pdfEditorInput";
-import type { EditorDocumentModel, EditorFontOption, EditorPageModel, EditorTextBlock, ImageReplacement, RGBColor } from "@/lib/types";
+import type { EditorDocumentModel, EditorDocumentOverlay, EditorFontOption, EditorPageModel, EditorTextBlock, ImageReplacement, RGBColor } from "@/lib/types";
 
 type EditorStatus = "idle" | "loading" | "ready" | "error";
 
@@ -55,6 +55,14 @@ function isTextBlockDirty(block: EditorTextBlock) {
 
 function isInsertedTextBlock(block: EditorTextBlock) {
   return block.originalText === "" && block.id.includes("-new-");
+}
+
+function isOcrTextBlock(block: EditorTextBlock) {
+  return block.id.includes("-ocr-");
+}
+
+function isOcrImageBlock(block: { id: string }) {
+  return block.id.includes("-ocr-");
 }
 
 function downloadBytes(bytes: Uint8Array, fileName: string) {
@@ -235,6 +243,65 @@ function createInsertedTextBlock(page: EditorPageModel): EditorTextBlock {
   };
 }
 
+function applyDocumentOverlay(document: EditorDocumentModel, overlay?: EditorDocumentOverlay) {
+  if (!overlay?.pages.length) return document;
+
+  const pagesByIndex = new Map(overlay.pages.map((page) => [page.pageIndex, page]));
+
+  return {
+    ...document,
+    pages: document.pages.map((page) => {
+      const pageOverlay = pagesByIndex.get(page.pageIndex);
+      if (!pageOverlay) return page;
+
+      return {
+        ...page,
+        textBlocks: [...page.textBlocks, ...pageOverlay.textBlocks],
+        imageBlocks: pageOverlay.imageBlocks.length ? pageOverlay.imageBlocks : page.imageBlocks,
+      };
+    }),
+  } satisfies EditorDocumentModel;
+}
+
+function getSyntheticOverlay(document: EditorDocumentModel): EditorDocumentOverlay {
+  return {
+    pages: document.pages
+      .map((page) => ({
+        pageIndex: page.pageIndex,
+        textBlocks: page.textBlocks.filter(isOcrTextBlock),
+        imageBlocks: page.imageBlocks.filter(isOcrImageBlock),
+      }))
+      .filter((page) => page.textBlocks.length || page.imageBlocks.length),
+  };
+}
+
+function shiftOverlay(overlay: EditorDocumentOverlay | undefined, pageOffset: number): EditorDocumentOverlay | undefined {
+  if (!overlay?.pages.length) return undefined;
+
+  return {
+    pages: overlay.pages.map((page) => ({
+      pageIndex: page.pageIndex + pageOffset,
+      textBlocks: page.textBlocks.map((block) => ({
+        ...block,
+        id: `p${page.pageIndex + pageOffset + 1}-${block.id}`,
+        pageIndex: block.pageIndex + pageOffset,
+        pageNumber: block.pageNumber + pageOffset,
+      })),
+      imageBlocks: page.imageBlocks.map((block) => ({
+        ...block,
+        id: `p${page.pageIndex + pageOffset + 1}-${block.id}`,
+        pageIndex: block.pageIndex + pageOffset,
+        pageNumber: block.pageNumber + pageOffset,
+      })),
+    })),
+  };
+}
+
+function combineOverlays(...overlays: Array<EditorDocumentOverlay | undefined>): EditorDocumentOverlay | undefined {
+  const pages = overlays.flatMap((overlay) => overlay?.pages ?? []);
+  return pages.length ? { pages } : undefined;
+}
+
 export function usePDFEditor() {
   const pdfRef = useRef<any>(null);
   const [documentModel, setDocumentModel] = useState<EditorDocumentModel | null>(null);
@@ -261,7 +328,7 @@ export function usePDFEditor() {
 
   const fontOptions = useMemo(() => buildFontOptions(documentModel), [documentModel]);
 
-  const loadBytes = useCallback(async (bytes: ArrayBuffer | Uint8Array, fileName: string, options?: { downloadable?: boolean }) => {
+  const loadBytes = useCallback(async (bytes: ArrayBuffer | Uint8Array, fileName: string, options?: { downloadable?: boolean; overlay?: EditorDocumentOverlay }) => {
     setStatus("loading");
     setError(null);
     setSelectedBlockId(null);
@@ -270,7 +337,8 @@ export function usePDFEditor() {
 
     try {
       const loaded = await extractPDFDocument(bytes, fileName);
-      const documentWithFonts = await registerEmbeddedFonts(loaded.document);
+      const documentWithOverlay = applyDocumentOverlay(loaded.document, options?.overlay);
+      const documentWithFonts = await registerEmbeddedFonts(documentWithOverlay);
       pdfRef.current = loaded.pdf;
       setDocumentModel(documentWithFonts);
       setStatus("ready");
@@ -281,9 +349,10 @@ export function usePDFEditor() {
     }
   }, []);
 
-  const loadMergedDocument = useCallback(async (bytes: Uint8Array, fileName: string) => {
+  const loadMergedDocument = useCallback(async (bytes: Uint8Array, fileName: string, overlay?: EditorDocumentOverlay) => {
     const loaded = await extractPDFDocument(bytes, fileName);
-    const documentWithFonts = await registerEmbeddedFonts(loaded.document);
+    const documentWithOverlay = applyDocumentOverlay(loaded.document, overlay);
+    const documentWithFonts = await registerEmbeddedFonts(documentWithOverlay);
     pdfRef.current = loaded.pdf;
     setDocumentModel(documentWithFonts);
     setSelectedBlockId(null);
@@ -535,6 +604,14 @@ export function usePDFEditor() {
           throw new Error("Choose PDF or image files to add.");
         }
         const sourceByteSets = [currentBytes, ...preparedFiles.map((file) => file.bytes)];
+        const overlays: Array<EditorDocumentOverlay | undefined> = [getSyntheticOverlay(documentModel)];
+        let pageOffset = documentModel.pageCount;
+
+        for (const preparedFile of preparedFiles) {
+          overlays.push(shiftOverlay(preparedFile.overlay, pageOffset));
+          const sourceDoc = await PDFDocument.load(preparedFile.bytes);
+          pageOffset += sourceDoc.getPageCount();
+        }
 
         for (const sourceBytes of sourceByteSets) {
           const sourceDoc = await PDFDocument.load(sourceBytes);
@@ -546,7 +623,7 @@ export function usePDFEditor() {
         const mergedBytes = await mergedDoc.save();
         const baseName = documentModel.fileName.replace(/\.pdf$/i, "");
         const suffix = preparedFiles.length === 1 ? "plus-1-page" : `plus-${preparedFiles.length}-files`;
-        await loadMergedDocument(mergedBytes, `${baseName}-${suffix}.pdf`);
+        await loadMergedDocument(mergedBytes, `${baseName}-${suffix}.pdf`, combineOverlays(...overlays));
         setStatus("ready");
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : "The files could not be added.";

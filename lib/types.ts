@@ -103,11 +103,22 @@ export type EditorDocumentModel = {
   pages: EditorPageModel[];
 };
 
+export type EditorPageOverlay = {
+  pageIndex: number;
+  textBlocks: EditorTextBlock[];
+  imageBlocks: EditorImageBlock[];
+};
+
+export type EditorDocumentOverlay = {
+  pages: EditorPageOverlay[];
+};
+
 export type StoredPDFDocument = {
   id: string;
   fileName: string;
   bytes: ArrayBuffer;
   createdAt: number;
   downloadable?: boolean;
+  overlay?: EditorDocumentOverlay;
   size: number;
 };

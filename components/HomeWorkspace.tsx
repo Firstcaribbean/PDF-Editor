@@ -47,7 +47,10 @@ export function HomeWorkspace() {
 
     try {
       const prepared = await preparePDFEditorInput(file);
-      const id = await storePDFBytes(prepared.bytes, prepared.fileName, { downloadable: prepared.source === "image" });
+      const id = await storePDFBytes(prepared.bytes, prepared.fileName, {
+        downloadable: prepared.source === "image",
+        overlay: prepared.overlay,
+      });
       router.push(`/editor?doc=${encodeURIComponent(id)}`);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "The file could not be opened.";

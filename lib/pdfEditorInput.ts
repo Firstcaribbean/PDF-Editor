@@ -1,5 +1,6 @@
 import { imagesToPdf } from "@/lib/converters/imgToPdf";
 import { getExtension, isImageFile, safeBaseName } from "@/lib/converters/shared";
+import { createScannedImageOverlay } from "@/lib/scannedImageOverlay";
 
 export const pdfEditorInputAccept = "application/pdf,.pdf,image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif";
 
@@ -21,10 +22,14 @@ export async function preparePDFEditorInput(file: File) {
   }
 
   if (isImageFile(file)) {
-    const pdfBlob = await imagesToPdf([file]);
+    const [pdfBlob, overlay] = await Promise.all([
+      imagesToPdf([file]),
+      createScannedImageOverlay(file).catch(() => undefined),
+    ]);
     return {
       bytes: await pdfBlob.arrayBuffer(),
       fileName: `${safeBaseName(file.name)}.pdf`,
+      overlay,
       source: "image" as const,
     };
   }

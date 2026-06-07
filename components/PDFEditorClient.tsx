@@ -55,6 +55,7 @@ export function PDFEditorClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [hasTriedInitialLoad, setHasTriedInitialLoad] = useState(false);
+  const [isOpeningFile, setIsOpeningFile] = useState(false);
   const editor = usePDFEditor();
   const { loadBytes, setActivePageIndex } = editor;
   const dirtyCount = editor.dirtyBlocks.length + editor.dirtyImageBlocks.length;
@@ -62,10 +63,22 @@ export function PDFEditorClient() {
 
   const handleFile = useCallback(
     async (file: File) => {
-      const prepared = await preparePDFEditorInput(file);
-      const id = await storePDFBytes(prepared.bytes, prepared.fileName, { downloadable: prepared.source === "image" });
-      router.replace(`/editor?doc=${encodeURIComponent(id)}`);
-      await loadBytes(prepared.bytes, prepared.fileName, { downloadable: prepared.source === "image" });
+      setIsOpeningFile(true);
+
+      try {
+        const prepared = await preparePDFEditorInput(file);
+        const id = await storePDFBytes(prepared.bytes, prepared.fileName, {
+          downloadable: prepared.source === "image",
+          overlay: prepared.overlay,
+        });
+        router.replace(`/editor?doc=${encodeURIComponent(id)}`);
+        await loadBytes(prepared.bytes, prepared.fileName, {
+          downloadable: prepared.source === "image",
+          overlay: prepared.overlay,
+        });
+      } finally {
+        setIsOpeningFile(false);
+      }
     },
     [loadBytes, router],
   );
@@ -87,7 +100,10 @@ export function PDFEditorClient() {
     async function loadInitialDocument(id: string) {
       const record = await loadStoredPDF(id);
       if (record) {
-        await loadBytes(record.bytes, record.fileName, { downloadable: record.downloadable });
+        await loadBytes(record.bytes, record.fileName, {
+          downloadable: record.downloadable,
+          overlay: record.overlay,
+        });
       }
       setHasTriedInitialLoad(true);
     }
@@ -120,12 +136,12 @@ export function PDFEditorClient() {
     [setActivePageIndex],
   );
 
-  if (editor.status === "loading" || !hasTriedInitialLoad) {
+  if (editor.status === "loading" || isOpeningFile || !hasTriedInitialLoad) {
     return <EditorLoading />;
   }
 
   if (!editor.documentModel || !editor.pdf) {
-    return <EditorEmptyState onFile={handleFile} onSample={handleSample} isLoading={false} />;
+    return <EditorEmptyState onFile={handleFile} onSample={handleSample} isLoading={isOpeningFile} />;
   }
 
   const editableTextCount = editor.documentModel.pages.reduce((total, page) => total + page.textBlocks.length, 0);
@@ -139,7 +155,7 @@ export function PDFEditorClient() {
         currentPage={editor.activePageIndex}
         dirtyCount={dirtyCount}
         fontOptions={editor.fontOptions}
-        isExporting={editor.isExporting}
+        isExporting={editor.isExporting || isOpeningFile}
         pageCount={editor.documentModel.pageCount}
         selectedTextBlock={editor.selectedTextBlock}
         zoom={editor.zoom}
