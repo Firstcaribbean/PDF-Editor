@@ -12,6 +12,7 @@ type PDFViewerProps = {
   zoom: number;
   onActivePageChange: (pageIndex: number) => void;
   onBlockChange: (blockId: string, text: string) => void;
+  onBlockMove: (blockId: string, deltaX: number, deltaY: number) => void;
   onBlockReset: (blockId: string) => void;
   onBlockSelect: (blockId: string | null) => void;
   onImageReplace: (blockId: string, replacement: ImageReplacement) => void;
@@ -93,6 +94,7 @@ function PageCanvas({
   zoom,
   onActivePageChange,
   onBlockChange,
+  onBlockMove,
   onBlockReset,
   onBlockSelect,
   onImageReplace,
@@ -106,6 +108,7 @@ function PageCanvas({
   zoom: number;
   onActivePageChange: (pageIndex: number) => void;
   onBlockChange: (blockId: string, text: string) => void;
+  onBlockMove: (blockId: string, deltaX: number, deltaY: number) => void;
   onBlockReset: (blockId: string) => void;
   onBlockSelect: (blockId: string | null) => void;
   onImageReplace: (blockId: string, replacement: ImageReplacement) => void;
@@ -207,6 +210,7 @@ function PageCanvas({
           selectedBlockId={selectedBlockId}
           zoom={zoom}
           onChange={onBlockChange}
+          onMove={onBlockMove}
           onImageReplace={onImageReplace}
           onReset={onBlockReset}
           onSelect={onBlockSelect}
@@ -224,6 +228,7 @@ export function PDFViewer({
   zoom,
   onActivePageChange,
   onBlockChange,
+  onBlockMove,
   onBlockReset,
   onBlockSelect,
   onImageReplace,
@@ -242,6 +247,7 @@ export function PDFViewer({
           zoom={zoom}
           onActivePageChange={onActivePageChange}
           onBlockChange={onBlockChange}
+          onBlockMove={onBlockMove}
           onBlockReset={onBlockReset}
           onBlockSelect={onBlockSelect}
           onImageReplace={onImageReplace}

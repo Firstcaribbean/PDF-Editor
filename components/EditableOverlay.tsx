@@ -1,7 +1,7 @@
 "use client";
 
-import { ChangeEvent, ClipboardEvent, KeyboardEvent, useEffect, useLayoutEffect, useRef } from "react";
-import { ImagePlus } from "lucide-react";
+import { ChangeEvent, ClipboardEvent, KeyboardEvent, PointerEvent, useEffect, useLayoutEffect, useRef } from "react";
+import { ImagePlus, Move } from "lucide-react";
 import { colorToCss } from "@/lib/fontMapper";
 import type { EditorImageBlock, EditorTextBlock, ImageReplacement } from "@/lib/types";
 
@@ -11,6 +11,7 @@ type EditableOverlayProps = {
   selectedBlockId: string | null;
   zoom: number;
   onChange: (blockId: string, text: string) => void;
+  onMove: (blockId: string, deltaX: number, deltaY: number) => void;
   onImageReplace: (blockId: string, replacement: ImageReplacement) => void;
   onReset: (blockId: string) => void;
   onSelect: (blockId: string | null) => void;
@@ -21,6 +22,7 @@ function EditableTextBlock({
   isSelected,
   zoom,
   onChange,
+  onMove,
   onReset,
   onSelect,
 }: {
@@ -28,10 +30,12 @@ function EditableTextBlock({
   isSelected: boolean;
   zoom: number;
   onChange: (blockId: string, text: string) => void;
+  onMove: (blockId: string, deltaX: number, deltaY: number) => void;
   onReset: (blockId: string) => void;
   onSelect: (blockId: string | null) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; moved: boolean } | null>(null);
   const isOcrBlock = block.id.includes("-ocr-");
 
   useLayoutEffect(() => {
@@ -71,6 +75,34 @@ function EditableTextBlock({
       ref.current?.blur();
     }
   };
+
+  const handleMoveStart = (event: PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, moved: false };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    onSelect(block.id);
+  };
+
+  const handleMove = (event: PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    const deltaX = (event.clientX - drag.startX) / zoom;
+    const deltaY = (event.clientY - drag.startY) / zoom;
+    if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1) return;
+
+    drag.moved = true;
+    onMove(block.id, deltaX, deltaY);
+    drag.startX = event.clientX;
+    drag.startY = event.clientY;
+  };
+
+  const handleMoveEnd = (event: PointerEvent<HTMLButtonElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      dragRef.current = null;
+    }
+  };
   const horizontalScale = block.horizontalScale || 1;
   const transform = [
     block.rotation ? `rotate(${block.rotation}deg)` : "",
@@ -81,38 +113,58 @@ function EditableTextBlock({
   const lineHeight = Math.max(block.screen.height / Math.max(block.fontSize, 1), 1);
 
   return (
-    <div
-      ref={ref}
-      className={`editable-block ${isOcrBlock ? "is-ocr" : ""} ${block.dirty ? "is-dirty" : ""} ${isSelected ? "is-selected" : ""}`}
-      contentEditable
-      role="textbox"
-      aria-label={`Text on page ${block.pageNumber}`}
-      spellCheck={false}
-      suppressContentEditableWarning
-      onFocus={() => onSelect(block.id)}
-      onInput={(event) => onChange(block.id, event.currentTarget.innerText.replace(/\n$/, ""))}
-      onPaste={handlePaste}
-      onKeyDown={handleKeyDown}
-      style={{
-        left: `${block.screen.left * zoom}px`,
-        top: `${block.screen.top * zoom}px`,
-        width: `${Math.max((block.screen.width * zoom) / horizontalScale, 8)}px`,
-        height: `${Math.max(block.screen.height * zoom, 8)}px`,
-        fontFamily: block.fontFamily,
-        fontSize: `${block.fontSize * zoom}px`,
-        fontWeight: block.fontWeight,
-        fontStyle: block.fontStyle,
-        textDecorationLine: [block.underline ? "underline" : "", block.strikeThrough ? "line-through" : ""]
-          .filter(Boolean)
-          .join(" "),
-        textDecorationThickness: `${Math.max(block.fontSize * zoom * 0.06, 0.7)}px`,
-        lineHeight,
-        transform: transform || undefined,
-        transformOrigin: "left top",
-        ["--block-color" as string]: colorToCss(block.color),
-        ["--block-bg" as string]: colorToCss(block.backgroundColor),
-      }}
-    />
+    <>
+      <div
+        ref={ref}
+        className={`editable-block ${isOcrBlock ? "is-ocr" : ""} ${block.text ? "" : "is-deleted"} ${block.dirty ? "is-dirty" : ""} ${isSelected ? "is-selected" : ""}`}
+        contentEditable={Boolean(block.text)}
+        role="textbox"
+        aria-label={`Text on page ${block.pageNumber}`}
+        spellCheck={false}
+        suppressContentEditableWarning
+        onFocus={() => onSelect(block.id)}
+        onInput={(event) => onChange(block.id, event.currentTarget.innerText.replace(/\n$/, ""))}
+        onPaste={handlePaste}
+        onKeyDown={handleKeyDown}
+        style={{
+          left: `${block.screen.left * zoom}px`,
+          top: `${block.screen.top * zoom}px`,
+          width: `${Math.max((block.screen.width * zoom) / horizontalScale, 8)}px`,
+          height: `${Math.max(block.screen.height * zoom, 8)}px`,
+          fontFamily: block.fontFamily,
+          fontSize: `${block.fontSize * zoom}px`,
+          fontWeight: block.fontWeight,
+          fontStyle: block.fontStyle,
+          textDecorationLine: [block.underline ? "underline" : "", block.strikeThrough ? "line-through" : ""]
+            .filter(Boolean)
+            .join(" "),
+          textDecorationThickness: `${Math.max(block.fontSize * zoom * 0.06, 0.7)}px`,
+          lineHeight,
+          transform: transform || undefined,
+          transformOrigin: "left top",
+          ["--block-color" as string]: colorToCss(block.color),
+          ["--block-bg" as string]: colorToCss(block.backgroundColor),
+        }}
+      />
+      {isSelected && block.text ? (
+        <button
+          className="editable-move-handle"
+          type="button"
+          title="Move text box"
+          aria-label="Move text box"
+          onPointerDown={handleMoveStart}
+          onPointerMove={handleMove}
+          onPointerUp={handleMoveEnd}
+          onPointerCancel={handleMoveEnd}
+          style={{
+            left: `${(block.screen.left + block.screen.width) * zoom + 4}px`,
+            top: `${Math.max(0, block.screen.top * zoom - 4)}px`,
+          }}
+        >
+          <Move size={12} aria-hidden="true" />
+        </button>
+      ) : null}
+    </>
   );
 }
 
@@ -199,6 +251,7 @@ export function EditableOverlay({
   selectedBlockId,
   zoom,
   onChange,
+  onMove,
   onImageReplace,
   onReset,
   onSelect,
@@ -215,6 +268,7 @@ export function EditableOverlay({
           isSelected={selectedBlockId === block.id}
           zoom={zoom}
           onChange={onChange}
+          onMove={onMove}
           onReset={onReset}
           onSelect={onSelect}
         />

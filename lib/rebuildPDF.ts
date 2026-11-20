@@ -81,7 +81,8 @@ function exactStandardFont(fontName: string, fontWeight?: string, fontStyle?: st
     return StandardFonts.Helvetica;
   }
 
-  if (normalized === "times roman" || normalized === "times" || normalized === "times new roman") {
+  const isTimes = normalized.includes("times") || normalized.includes("serif") || normalized.includes("roman");
+  if (isTimes) {
     if (isBold && isItalic) return StandardFonts.TimesRomanBoldItalic;
     if (isBold) return StandardFonts.TimesRomanBold;
     if (isItalic) return StandardFonts.TimesRomanItalic;
@@ -179,6 +180,8 @@ export async function rebuildPDF(originalBytes: Uint8Array, edits: RebuildPDFInp
     }
 
     const lineHeight = fontSize * 1.15;
+    if (!block.text.trim()) continue;
+
     normalizeLines(block.text).forEach((line, lineIndex) => {
       const lineY = block.pdf.y - lineIndex * lineHeight;
       const lineWidth = font.widthOfTextAtSize(line || " ", fontSize);

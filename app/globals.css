@@ -13,6 +13,43 @@
   --shadow: 0 18px 60px rgba(22, 24, 19, 0.14);
 }
 
+.editable-block.is-deleted {
+  display: none;
+}
+
+.editable-move-handle {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--accent);
+  cursor: move;
+  box-shadow: 0 2px 6px rgba(22, 24, 19, 0.18);
+}
+
+.editable-move-handle:hover {
+  background: #eef8f6;
+}
+
+.font-size-readout {
+  min-width: 42px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.danger-button:not(:disabled):hover {
+  color: #b42318;
+  border-color: rgba(180, 35, 24, 0.45);
+}
+
 * {
   box-sizing: border-box;
 }

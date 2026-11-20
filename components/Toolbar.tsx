@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
-import { Bold, ChevronLeft, ChevronRight, Download, FilePlus2, Italic, Minus, Plus, RotateCcw, Strikethrough, Type, Underline } from "lucide-react";
+import { Bold, ChevronLeft, ChevronRight, Download, FilePlus2, Italic, Minus, Plus, RotateCcw, Strikethrough, Trash2, Type, Underline } from "lucide-react";
 import { PDFUploader } from "@/components/PDFUploader";
 import { isPDFEditorInput, pdfEditorInputAccept } from "@/lib/pdfEditorInput";
 import type { EditorFontOption, EditorTextBlock } from "@/lib/types";
@@ -18,11 +18,12 @@ type ToolbarProps = {
   hasMergedPages: boolean;
   onAddPDFs: (files: File[]) => void | Promise<void>;
   onAddText: () => void;
+  onDeleteText: (blockId: string) => void;
   onDownload: () => void;
   onFile: (file: File) => void | Promise<void>;
   onFormatChange: (
     blockId: string,
-    patch: Partial<Pick<EditorTextBlock, "fontName" | "fontFamily" | "fontWeight" | "fontStyle" | "underline" | "strikeThrough">>,
+    patch: Partial<Pick<EditorTextBlock, "fontName" | "fontFamily" | "fontWeight" | "fontStyle" | "underline" | "strikeThrough" | "fontSize">>,
   ) => void;
   onPageChange: (pageIndex: number) => void;
   onResetAll: () => void;
@@ -41,6 +42,7 @@ export function Toolbar({
   hasMergedPages,
   onAddPDFs,
   onAddText,
+  onDeleteText,
   onDownload,
   onFile,
   onFormatChange,
@@ -109,6 +111,29 @@ export function Toolbar({
             disabled={isExporting}
           />
         </label>
+        <button
+          className="icon-button"
+          type="button"
+          title="Decrease font size"
+          aria-label="Decrease font size"
+          onClick={() => selectedTextBlock && onFormatChange(selectedTextBlock.id, { fontSize: Math.max(4, selectedTextBlock.fontSize - 1) })}
+          disabled={!hasSelection || isExporting}
+        >
+          <Minus size={16} aria-hidden="true" />
+        </button>
+        <span className="font-size-readout" title="Font size">
+          {selectedTextBlock ? `${Math.round(selectedTextBlock.fontSize)} pt` : "Size"}
+        </span>
+        <button
+          className="icon-button"
+          type="button"
+          title="Increase font size"
+          aria-label="Increase font size"
+          onClick={() => selectedTextBlock && onFormatChange(selectedTextBlock.id, { fontSize: Math.min(144, selectedTextBlock.fontSize + 1) })}
+          disabled={!hasSelection || isExporting}
+        >
+          <Plus size={16} aria-hidden="true" />
+        </button>
         <span className="toolbar-divider" />
         <button
           className="icon-button"
@@ -217,6 +242,16 @@ export function Toolbar({
           disabled={!hasSelection || isExporting}
         >
           <Strikethrough size={16} aria-hidden="true" />
+        </button>
+        <button
+          className="icon-button danger-button"
+          type="button"
+          title="Delete selected text box"
+          aria-label="Delete selected text box"
+          onClick={() => selectedTextBlock && onDeleteText(selectedTextBlock.id)}
+          disabled={!hasSelection || isExporting}
+        >
+          <Trash2 size={16} aria-hidden="true" />
         </button>
         <span className="toolbar-divider" />
         <button

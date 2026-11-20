@@ -162,6 +162,7 @@ export function PDFEditorClient() {
         hasMergedPages={editor.hasMergedPages}
         onAddPDFs={editor.appendPDFs}
         onAddText={editor.addTextBlock}
+        onDeleteText={editor.deleteBlock}
         onDownload={editor.exportPDF}
         onFile={handleFile}
         onFormatChange={editor.updateBlockFormat}
@@ -196,6 +197,7 @@ export function PDFEditorClient() {
             zoom={editor.zoom}
             onActivePageChange={editor.setActivePageIndex}
             onBlockChange={editor.updateBlockText}
+            onBlockMove={editor.moveBlock}
             onBlockReset={editor.resetBlock}
             onBlockSelect={editor.setSelectedBlockId}
             onImageReplace={editor.replaceImageBlock}

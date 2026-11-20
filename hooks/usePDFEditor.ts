@@ -15,7 +15,7 @@ type BackgroundSample = {
 };
 
 type TextFormatPatch = Partial<
-  Pick<EditorTextBlock, "fontName" | "fontFamily" | "fontWeight" | "fontStyle" | "underline" | "strikeThrough">
+  Pick<EditorTextBlock, "fontName" | "fontFamily" | "fontWeight" | "fontStyle" | "underline" | "strikeThrough" | "fontSize">
 >;
 
 const loadedFontFaces = new Set<string>();
@@ -395,10 +395,25 @@ export function usePDFEditor() {
           textBlocks: page.textBlocks.map((block) =>
             block.id === blockId
               ? (() => {
+                  const previousFontSize = block.fontSize;
                   const updated = { ...block, ...patch };
+                  if (patch.fontSize && patch.fontSize !== previousFontSize) {
+                    const ratio = patch.fontSize / Math.max(previousFontSize, 1);
+                    updated.screen = {
+                      ...updated.screen,
+                      width: updated.screen.width * ratio,
+                      height: Math.max(8, updated.screen.height * ratio),
+                    };
+                    updated.pdf = {
+                      ...updated.pdf,
+                      width: updated.pdf.width * ratio,
+                      height: Math.max(4, updated.pdf.height * ratio),
+                    };
+                    updated.pdfFontSize = patch.fontSize;
+                  }
                   return {
                     ...updated,
-                    dirty: isTextBlockDirty(updated),
+                    dirty: block.dirty || isTextBlockDirty(updated),
                   };
                 })()
               : block,
@@ -406,6 +421,56 @@ export function usePDFEditor() {
         })),
       };
     });
+  }, []);
+
+  const moveBlock = useCallback((blockId: string, deltaX: number, deltaY: number) => {
+    setDocumentModel((current) => {
+      if (!current) return current;
+
+      return {
+        ...current,
+        pages: current.pages.map((page) => ({
+          ...page,
+          textBlocks: page.textBlocks.map((block) =>
+            block.id === blockId
+              ? {
+                  ...block,
+                  screen: {
+                    ...block.screen,
+                    left: Math.max(0, block.screen.left + deltaX),
+                    top: Math.max(0, block.screen.top + deltaY),
+                  },
+                  pdf: {
+                    ...block.pdf,
+                    x: Math.max(0, block.pdf.x + deltaX),
+                    y: block.pdf.y - deltaY,
+                  },
+                  dirty: true,
+                }
+              : block,
+          ),
+        })),
+      };
+    });
+  }, []);
+
+  const deleteBlock = useCallback((blockId: string) => {
+    setDocumentModel((current) => {
+      if (!current) return current;
+
+      return {
+        ...current,
+        pages: current.pages.map((page) => ({
+          ...page,
+          textBlocks: page.textBlocks.flatMap((block) => {
+            if (block.id !== blockId) return [block];
+            if (isInsertedTextBlock(block)) return [];
+            return [{ ...block, text: "", dirty: true }];
+          }),
+        })),
+      };
+    });
+    setSelectedBlockId(null);
   }, []);
 
   const resetBlock = useCallback((blockId: string) => {
@@ -662,6 +727,8 @@ export function usePDFEditor() {
     setActivePageIndex,
     setSelectedBlockId,
     setZoom: setZoomClamped,
+    deleteBlock,
+    moveBlock,
     updateBlockText,
     updateBlockFormat,
     updatePageBackgrounds,
